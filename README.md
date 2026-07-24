@@ -1,6 +1,6 @@
 # Automation ROI Explorer
 
-![CI](https://github.com/Dimikissimov/automation-roi-explorer/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/Dimitres-Kisimov/automation-roi-explorer/actions/workflows/ci.yml/badge.svg)
 
 Every back-office team has a queue of manual processes they could automate and not enough budget to do all of them. The interesting question isn't "can we automate this" — it's "which one first, and is it actually worth it?" This tool puts numbers on that: hours saved, euros saved, payback period, and 3-year ROI for each candidate, so the backlog gets ranked by value instead of by whoever asked loudest.
 
