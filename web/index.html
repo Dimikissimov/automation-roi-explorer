@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Automation ROI Explorer</title>
+<style>
+  /* --- Design tokens (light) — mirror dataviz reference palette ---------- */
+  :root {
+    color-scheme: light;
+    --page:        #f9f9f7;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --muted:       #898781;
+    --grid:        #e1e0d9;
+    --axis:        #c3c2b7;
+    --border:      rgba(11,11,11,0.10);
+    --series-1:    #2a78d6;  /* blue — € saved bars           */
+    --accent:      #eb6834;  /* orange — selected process     */
+    --good:        #0ca30c;
+    --warning:     #fab219;
+    --serious:     #ec835a;
+    --critical:    #d03b3b;
+    --success-txt: #006300;
+    --shadow:      0 1px 2px rgba(11,11,11,.06), 0 4px 16px rgba(11,11,11,.05);
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page:        #0d0d0d;
+      --surface:     #1a1a19;
+      --ink:         #ffffff;
+      --ink-2:       #c3c2b7;
+      --muted:       #898781;
+      --grid:        #2c2c2a;
+      --axis:        #383835;
+      --border:      rgba(255,255,255,0.10);
+      --series-1:    #3987e5;
+      --accent:      #d95926;
+      --good:        #0ca30c;
+      --success-txt: #0ca30c;
+      --shadow:      0 1px 2px rgba(0,0,0,.4), 0 4px 20px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink-2:#c3c2b7;
+    --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+    --border:rgba(255,255,255,0.10); --series-1:#3987e5; --accent:#d95926;
+    --good:#0ca30c; --success-txt:#0ca30c;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 20px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--series-1); }
+  h1, h2, h3 { line-height: 1.2; margin: 0; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
+
+  header.top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  header.top .titles { flex: 1 1 320px; }
+  .eyebrow { color: var(--series-1); font-weight: 700; font-size: 12.5px;
+             letter-spacing: .08em; text-transform: uppercase; }
+  h1 { font-size: 27px; margin-top: 4px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--ink-2); margin-top: 8px; max-width: 62ch; }
+
+  .theme-btn {
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2);
+    border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px;
+    cursor: pointer; box-shadow: var(--shadow);
+  }
+  .theme-btn:hover { color: var(--ink); }
+
+  /* --- KPI stat tiles --------------------------------------------------- */
+  .kpis { display: grid; gap: 14px; margin: 26px 0 10px;
+          grid-template-columns: repeat(4, 1fr); }
+  .kpi { background: var(--surface); border: 1px solid var(--border);
+         border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
+  .kpi .label { color: var(--muted); font-size: 12.5px; font-weight: 600;
+                text-transform: uppercase; letter-spacing: .05em; }
+  .kpi .value { font-size: 26px; font-weight: 700; margin-top: 8px;
+                letter-spacing: -0.02em; }
+  .kpi .unit { color: var(--ink-2); font-size: 13px; margin-top: 2px; }
+
+  /* --- Layout ----------------------------------------------------------- */
+  .grid { display: grid; gap: 20px; grid-template-columns: 360px 1fr;
+          margin-top: 20px; align-items: start; }
+  .card { background: var(--surface); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow); }
+  .card h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .05em;
+             color: var(--ink-2); }
+  .card h2 .hint { text-transform: none; letter-spacing: 0; color: var(--muted);
+                   font-weight: 400; font-size: 12.5px; display: block; margin-top: 4px; }
+
+  /* Process selector tabs */
+  .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+  .tab { border: 1px solid var(--border); background: transparent; color: var(--ink-2);
+         border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 12.5px;
+         cursor: pointer; }
+  .tab:hover { color: var(--ink); border-color: var(--axis); }
+  .tab[aria-selected="true"] { background: var(--series-1); color: #fff;
+         border-color: var(--series-1); font-weight: 600; }
+
+  /* Sliders */
+  .field { margin: 16px 0; }
+  .field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .field label { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+  .field .num { width: 108px; text-align: right; border: 1px solid var(--border);
+                background: var(--page); color: var(--ink); border-radius: 8px;
+                padding: 5px 8px; font: inherit; font-size: 13px;
+                font-variant-numeric: tabular-nums; }
+  .field input[type=range] { width: 100%; margin-top: 9px; accent-color: var(--series-1); }
+  .field .sub { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+
+  .editor-actions { display: flex; gap: 10px; margin-top: 12px; }
+  .btn { border: 1px solid var(--border); background: var(--page); color: var(--ink-2);
+         border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .btn:hover { color: var(--ink); border-color: var(--axis); }
+
+  /* Selected-process result readout */
+  .readout { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 8px; }
+  .readout .cell { background: var(--page); border: 1px solid var(--border);
+                   border-radius: 10px; padding: 11px 12px; }
+  .readout .cell .k { color: var(--muted); font-size: 11.5px; font-weight: 600;
+                      text-transform: uppercase; letter-spacing: .04em; }
+  .readout .cell .v { font-size: 18px; font-weight: 700; margin-top: 4px;
+                      font-variant-numeric: tabular-nums; }
+
+  /* Charts */
+  .charts { display: grid; gap: 20px; }
+  .chart-wrap { position: relative; }
+  canvas { width: 100%; display: block; }
+  .chart-title { font-size: 15px; text-transform: uppercase; letter-spacing: .05em;
+                 color: var(--ink-2); }
+  .chart-title .hint { text-transform: none; letter-spacing: 0; color: var(--muted);
+                       font-weight: 400; font-size: 12.5px; display: block; margin-top: 4px; }
+
+  /* tooltip */
+  .tt { position: absolute; pointer-events: none; opacity: 0; transition: opacity .08s;
+        background: var(--ink); color: var(--surface); padding: 7px 9px; border-radius: 8px;
+        font-size: 12px; white-space: nowrap; transform: translate(-50%, -120%);
+        box-shadow: var(--shadow); z-index: 5; }
+  .tt b { font-variant-numeric: tabular-nums; }
+
+  /* Ranked table */
+  .table-scroll { overflow-x: auto; margin-top: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--grid);
+           font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+  thead th { color: var(--muted); font-size: 12px; text-transform: uppercase;
+             letter-spacing: .04em; cursor: pointer; user-select: none; }
+  thead th:hover { color: var(--ink); }
+  thead th .arrow { color: var(--series-1); }
+  tbody tr:hover { background: color-mix(in srgb, var(--series-1) 8%, transparent); }
+  tbody tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  tbody tr { cursor: pointer; }
+  td .chip { display: inline-block; width: 9px; height: 9px; border-radius: 2px;
+             margin-right: 6px; vertical-align: middle; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px;
+          font-weight: 600; }
+  .pill.good     { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--success-txt); }
+  .pill.warning  { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--ink-2); }
+  .pill.serious  { background: color-mix(in srgb, var(--serious) 22%, transparent); color: var(--ink-2); }
+  .pill.critical { background: color-mix(in srgb, var(--critical) 20%, transparent); color: var(--critical); }
+
+  footer { color: var(--muted); font-size: 12.5px; margin-top: 34px;
+           border-top: 1px solid var(--grid); padding-top: 16px; }
+  footer code { background: var(--surface); border: 1px solid var(--border);
+                border-radius: 5px; padding: 1px 6px; }
+
+  @media (max-width: 860px) {
+    .kpis { grid-template-columns: repeat(2, 1fr); }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="titles">
+      <div class="eyebrow">Data &amp; AI · Automation business case</div>
+      <h1>Automation ROI Explorer</h1>
+      <p class="subtitle">Should we automate this process? Adjust the assumptions for any
+        candidate and watch hours saved, euros saved, payback and 3-year ROI update live.
+        The browser mirrors the Python <code>roi_model</code> — same formulas, same numbers.</p>
+    </div>
+    <button class="theme-btn" id="themeBtn" type="button">Toggle theme</button>
+  </header>
+
+  <!-- Portfolio KPIs ---------------------------------------------------- -->
+  <section class="kpis" id="kpis" aria-label="Portfolio totals"></section>
+
+  <div class="grid">
+
+    <!-- Editor -------------------------------------------------------- -->
+    <aside class="card" aria-label="Process assumptions editor">
+      <h2>Assumptions
+        <span class="hint">Pick a process, then tune its inputs. Charts recompute instantly.</span>
+      </h2>
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div id="editor"></div>
+      <div class="editor-actions">
+        <button class="btn" id="resetOne" type="button">Reset this process</button>
+        <button class="btn" id="resetAll" type="button">Reset all</button>
+      </div>
+
+      <h2 style="margin-top:22px">Selected process</h2>
+      <div class="readout" id="readout"></div>
+    </aside>
+
+    <!-- Charts + table ------------------------------------------------- -->
+    <main style="display:grid; gap:20px;">
+      <section class="card charts">
+        <div class="chart-wrap">
+          <div class="chart-title">Net € saved per year
+            <span class="hint">Labour value freed up minus running cost. Selected process highlighted.</span>
+          </div>
+          <canvas id="savingsChart" height="0"></canvas>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-title">Payback period
+            <span class="hint">Months to recover the one-off build cost. Shorter is better.</span>
+          </div>
+          <canvas id="paybackChart" height="0"></canvas>
+        </div>
+        <div class="tt" id="tt"></div>
+      </section>
+
+      <section class="card">
+        <h2>Automation backlog <span class="hint">Click a header to sort · click a row to edit that process</span></h2>
+        <div class="table-scroll">
+          <table id="backlog">
+            <thead><tr id="headRow"></tr></thead>
+            <tbody id="body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer>
+    Synthetic data · MIT © 2026 Dimitres Kisimov · Model horizon 3 years, discount rate 8% ·
+    The CLI equivalent is <code>python -m roi_model</code>.
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+ * automation-roi-explorer — browser mirror of the Python roi_model.
+ * The functions below reproduce roi_model/model.py exactly. Keep them
+ * in sync: any change to the math must be made in BOTH places.
+ * ===================================================================== */
+
+// --- Model-wide assumptions (mirror model.py) ------------------------
+const HORIZON_YEARS = 3;
+const DISCOUNT_RATE = 0.08;
+const MONTHS_PER_YEAR = 12;
+const MINUTES_PER_HOUR = 60;
+
+// --- Seed data (mirror roi_model/data/processes.csv) -----------------
+const SEED = [
+  { name: "RFQ email triage",        annual_volume: 48000,  minutes_manual: 6,  minutes_auto: 1,   hourly_wage: 32, coverage: 0.70, build_cost: 25000, monthly_cost: 400 },
+  { name: "Invoice matching (3-way)",annual_volume: 120000, minutes_manual: 4,  minutes_auto: 0.5, hourly_wage: 30, coverage: 0.85, build_cost: 40000, monthly_cost: 600 },
+  { name: "Product-data cleanup",    annual_volume: 15000,  minutes_manual: 12, minutes_auto: 3,   hourly_wage: 28, coverage: 0.60, build_cost: 18000, monthly_cost: 250 },
+  { name: "Returns processing",      annual_volume: 36000,  minutes_manual: 8,  minutes_auto: 2,   hourly_wage: 29, coverage: 0.75, build_cost: 30000, monthly_cost: 450 },
+  { name: "Supplier onboarding",     annual_volume: 2400,   minutes_manual: 45, minutes_auto: 12,  hourly_wage: 35, coverage: 0.50, build_cost: 22000, monthly_cost: 300 },
+];
+
+const round2 = (x) => Math.round((x + Number.EPSILON) * 100) / 100;
+
+// --- Core calculation (mirror model.compute) -------------------------
+function compute(p) {
+  const automated_volume = p.annual_volume * p.coverage;
+  const minutes_saved = Math.max(p.minutes_manual - p.minutes_auto, 0);
+
+  const annual_hours_saved   = (automated_volume * minutes_saved) / MINUTES_PER_HOUR;
+  const annual_gross_saving  = annual_hours_saved * p.hourly_wage;
+  const annual_running_cost  = p.monthly_cost * MONTHS_PER_YEAR;
+  const annual_net_saving    = annual_gross_saving - annual_running_cost;
+
+  let payback_months = null;
+  if (annual_net_saving > 0) {
+    payback_months = p.build_cost / (annual_net_saving / MONTHS_PER_YEAR);
+  }
+
+  const net_benefit_3y = annual_net_saving * HORIZON_YEARS - p.build_cost;
+  const total_cost_3y  = p.build_cost + annual_running_cost * HORIZON_YEARS;
+  const roi_3y_pct     = total_cost_3y > 0 ? (net_benefit_3y / total_cost_3y) * 100 : 0;
+
+  let npv_3y = -p.build_cost;
+  for (let t = 1; t <= HORIZON_YEARS; t++) {
+    npv_3y += annual_net_saving / Math.pow(1 + DISCOUNT_RATE, t);
+  }
+
+  return {
+    name: p.name,
+    automated_volume:   round2(automated_volume),
+    annual_hours_saved: round2(annual_hours_saved),
+    annual_gross_saving:round2(annual_gross_saving),
+    annual_running_cost:round2(annual_running_cost),
+    annual_net_saving:  round2(annual_net_saving),
+    payback_months:     payback_months === null ? null : round2(payback_months),
+    net_benefit_3y:     round2(net_benefit_3y),
+    roi_3y_pct:         round2(roi_3y_pct),
+    npv_3y:             round2(npv_3y),
+  };
+}
+
+// --- Ranking (mirror model.rank) -------------------------------------
+function rankResults(results, key) {
+  const arr = results.slice();
+  const smallerBetter = key === "payback_months";
+  arr.sort((a, b) => {
+    let av = a[key], bv = b[key];
+    if (av === null) av = smallerBetter ?  Infinity : -Infinity;
+    if (bv === null) bv = smallerBetter ?  Infinity : -Infinity;
+    return smallerBetter ? av - bv : bv - av;
+  });
+  return arr;
+}
+
+/* ===================== formatting helpers ========================== */
+const eur = (x) => "€" + Math.round(x).toLocaleString("en-US");
+const num = (x, d = 0) => Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const payFmt = (m) => m === null ? "never" : num(m, 1) + " mo";
+
+// Payback tier -> status class (good / warning / serious / critical / never)
+function paybackTier(m) {
+  if (m === null) return { cls: "critical", label: "never" };
+  if (m <= 6)  return { cls: "good",     label: "≤ 6 mo" };
+  if (m <= 12) return { cls: "warning",  label: "≤ 12 mo" };
+  if (m <= 24) return { cls: "serious",  label: "≤ 24 mo" };
+  return { cls: "critical", label: "> 24 mo" };
+}
+
+/* ===================== application state =========================== */
+let state = structuredClone(SEED);   // editable working copy
+let selectedIndex = 0;               // which process the editor targets
+let sortKey = "net_benefit_3y";      // backlog sort column
+let sortDir = -1;                    // -1 desc, 1 asc (net benefit desc default)
+
+// Editable fields shown as sliders in the editor.
+const FIELDS = [
+  { key: "annual_volume",  label: "Annual volume",       min: 0,  max: 200000, step: 500,  fmt: (v)=>num(v)+" /yr" },
+  { key: "minutes_manual", label: "Minutes/task — manual",min: 0, max: 90,     step: 0.5,  fmt: (v)=>num(v,1)+" min" },
+  { key: "minutes_auto",   label: "Minutes/task — auto",  min: 0, max: 90,     step: 0.5,  fmt: (v)=>num(v,1)+" min" },
+  { key: "hourly_wage",    label: "Hourly wage",          min: 10, max: 80,    step: 1,    fmt: (v)=>eur(v)+"/h" },
+  { key: "coverage",       label: "Automation coverage",  min: 0,  max: 1,     step: 0.05, fmt: (v)=>num(v*100)+"%" },
+  { key: "build_cost",     label: "One-off build cost",   min: 0,  max: 120000,step: 1000, fmt: (v)=>eur(v) },
+  { key: "monthly_cost",   label: "Monthly running cost", min: 0,  max: 5000,  step: 50,   fmt: (v)=>eur(v)+"/mo" },
+];
+
+const COLUMNS = [
+  { key: "name",               label: "Process",     kind: "name" },
+  { key: "annual_hours_saved", label: "Hours/yr",    kind: "num" },
+  { key: "annual_net_saving",  label: "Net €/yr",    kind: "eur" },
+  { key: "payback_months",     label: "Payback",     kind: "pay" },
+  { key: "roi_3y_pct",         label: "3y ROI",      kind: "pct" },
+  { key: "npv_3y",             label: "NPV 3y",      kind: "eur" },
+];
+
+/* ===================== theme-aware canvas colors =================== */
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+function chartColors() {
+  return {
+    surface: cssVar("--surface"),
+    ink: cssVar("--ink"), ink2: cssVar("--ink-2"), muted: cssVar("--muted"),
+    grid: cssVar("--grid"), axis: cssVar("--axis"),
+    series: cssVar("--series-1"), accent: cssVar("--accent"),
+    good: cssVar("--good"), warning: cssVar("--warning"),
+    serious: cssVar("--serious"), critical: cssVar("--critical"),
+  };
+}
+
+/* ===================== reusable horizontal bar chart =============== */
+// Draws category rows with a value bar; returns hit-boxes for tooltips.
+function drawBars(canvas, spec) {
+  const c = chartColors();
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600;
+  const rowH = 34, padTop = 8, padBottom = 22;
+  const cssH = padTop + spec.items.length * rowH + padBottom;
+
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  canvas.style.height = cssH + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  ctx.font = "12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+
+  const labelW = 150;                       // left gutter for category names
+  const valueW = 74;                        // right gutter for value labels
+  const x0 = labelW, x1 = cssW - valueW;
+  const plotW = Math.max(x1 - x0, 40);
+  const maxVal = Math.max(spec.maxOverride || 0, ...spec.items.map(i => i.value), 1);
+
+  // gridlines (recessive) + baseline
+  ctx.strokeStyle = c.grid; ctx.lineWidth = 1;
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t++) {
+    const gx = x0 + (plotW * t) / ticks;
+    ctx.beginPath(); ctx.moveTo(gx + .5, padTop); ctx.lineTo(gx + .5, cssH - padBottom); ctx.stroke();
+    ctx.fillStyle = c.muted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(spec.axisFmt((maxVal * t) / ticks), gx, cssH - padBottom + 6);
+  }
+
+  const boxes = [];
+  spec.items.forEach((it, i) => {
+    const yTop = padTop + i * rowH;
+    const cy = yTop + rowH / 2;
+    const bh = 16;
+    const isSel = it.name === spec.selectedName;
+
+    // category label
+    ctx.fillStyle = isSel ? c.ink : c.ink2;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.font = (isSel ? "600 " : "") + "12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    ctx.fillText(truncate(ctx, it.label, labelW - 12), 0, cy);
+
+    const w = it.value <= 0 ? 0 : Math.max((it.value / maxVal) * plotW, 2);
+    const fill = spec.colorFor ? spec.colorFor(it) : c.series;
+
+    if (it.value <= 0 && it.zeroLabel) {
+      // e.g. "never pays back" — draw a muted full-width ghost bar
+      ctx.fillStyle = c.grid;
+      roundRect(ctx, x0, cy - bh/2, plotW, bh, 4); ctx.fill();
+      ctx.fillStyle = c.muted; ctx.textAlign = "left";
+      ctx.fillText(it.zeroLabel, x0 + 8, cy);
+    } else {
+      ctx.fillStyle = fill;
+      roundRect(ctx, x0, cy - bh/2, w, bh, 4); ctx.fill();
+      if (isSel) {                                   // 2px accent ring on selected
+        ctx.strokeStyle = c.accent; ctx.lineWidth = 2;
+        roundRect(ctx, x0, cy - bh/2, w, bh, 4); ctx.stroke();
+      }
+    }
+
+    // value label at the row end
+    ctx.fillStyle = isSel ? c.ink : c.ink2;
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.font = "12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+    ctx.fillText(it.valueLabel, cssW, cy);
+
+    boxes.push({ x: 0, y: yTop, w: cssW, h: rowH, item: it });
+  });
+
+  return boxes;
+}
+
+function truncate(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxW) t = t.slice(0, -1);
+  return t + "…";
+}
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, h / 2, w / 2 < 0 ? 0 : w / 2);
+  if (w <= 0) { ctx.beginPath(); return; }
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/* ===================== render pipeline ============================= */
+let savingsBoxes = [], paybackBoxes = [];
+
+function computedResults() {
+  return state.map(compute);
+}
+
+function render() {
+  const results = computedResults();
+  const byName = Object.fromEntries(results.map(r => [r.name, r]));
+
+  renderKPIs(results);
+  renderTabs();
+  renderEditor();
+  renderReadout(byName[state[selectedIndex].name]);
+  renderCharts(results);
+  renderTable(results);
+}
+
+function renderKPIs(results) {
+  const totalHours = results.reduce((s, r) => s + r.annual_hours_saved, 0);
+  const totalNet   = results.reduce((s, r) => s + r.annual_net_saving, 0);
+  const totalBuild = state.reduce((s, p) => s + p.build_cost, 0);
+  const totalCost3y = state.reduce((s, p) => s + p.build_cost + p.monthly_cost * 12 * HORIZON_YEARS, 0);
+  const netBenefit3y = results.reduce((s, r) => s + r.net_benefit_3y, 0);
+  const portfolioRoi = totalCost3y > 0 ? (netBenefit3y / totalCost3y) * 100 : 0;
+  // Blended payback: total build cost / total monthly net saving.
+  const monthlyNet = totalNet / 12;
+  const blendedPayback = monthlyNet > 0 ? totalBuild / monthlyNet : null;
+
+  const tiles = [
+    { label: "Hours saved / yr",  value: num(totalHours),        unit: "person-hours freed" },
+    { label: "Net € saved / yr",  value: eur(totalNet),          unit: "after running costs" },
+    { label: "Blended payback",   value: payFmt(blendedPayback), unit: "across the portfolio" },
+    { label: "3-year ROI",        value: num(portfolioRoi) + "%",unit: "return on total spend" },
+  ];
+  document.getElementById("kpis").innerHTML = tiles.map(t => `
+    <div class="kpi">
+      <div class="label">${t.label}</div>
+      <div class="value">${t.value}</div>
+      <div class="unit">${t.unit}</div>
+    </div>`).join("");
+}
+
+function renderTabs() {
+  const tabs = document.getElementById("tabs");
+  tabs.innerHTML = state.map((p, i) => `
+    <button class="tab" role="tab" aria-selected="${i === selectedIndex}"
+            data-idx="${i}" type="button">${p.name}</button>`).join("");
+  tabs.querySelectorAll(".tab").forEach(b =>
+    b.addEventListener("click", () => { selectedIndex = +b.dataset.idx; render(); }));
+}
+
+function renderEditor() {
+  const p = state[selectedIndex];
+  const el = document.getElementById("editor");
+  el.innerHTML = FIELDS.map(f => `
+    <div class="field" data-key="${f.key}">
+      <div class="row">
+        <label for="r_${f.key}">${f.label}</label>
+        <input class="num" id="n_${f.key}" type="number"
+               min="${f.min}" max="${f.max}" step="${f.step}" value="${p[f.key]}">
+      </div>
+      <input id="r_${f.key}" type="range"
+             min="${f.min}" max="${f.max}" step="${f.step}" value="${p[f.key]}">
+      <div class="sub" id="s_${f.key}">${f.fmt(p[f.key])}</div>
+    </div>`).join("");
+
+  FIELDS.forEach(f => {
+    const range = document.getElementById("r_" + f.key);
+    const numI  = document.getElementById("n_" + f.key);
+    const sub   = document.getElementById("s_" + f.key);
+    const apply = (raw) => {
+      let v = parseFloat(raw);
+      if (isNaN(v)) return;
+      v = Math.min(Math.max(v, f.min), f.max);
+      state[selectedIndex][f.key] = v;
+      range.value = v; numI.value = v; sub.textContent = f.fmt(v);
+      renderKPIs(computedResults());
+      renderReadout(compute(state[selectedIndex]));
+      renderCharts(computedResults());
+      renderTable(computedResults());
+    };
+    range.addEventListener("input", (e) => apply(e.target.value));
+    numI.addEventListener("input",  (e) => apply(e.target.value));
+  });
+}
+
+function renderReadout(r) {
+  const cells = [
+    { k: "Hours / yr",     v: num(r.annual_hours_saved) },
+    { k: "Net € / yr",     v: eur(r.annual_net_saving) },
+    { k: "Payback",        v: payFmt(r.payback_months) },
+    { k: "3-year ROI",     v: num(r.roi_3y_pct) + "%" },
+    { k: "3-year net €",   v: eur(r.net_benefit_3y) },
+    { k: "NPV (8%)",       v: eur(r.npv_3y) },
+  ];
+  document.getElementById("readout").innerHTML = cells.map(c => `
+    <div class="cell"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
+}
+
+function renderCharts(results) {
+  const c = chartColors();
+  const selName = state[selectedIndex].name;
+
+  // Chart 1: net € saved per process (single blue series, selected accented)
+  const savingsItems = results.map(r => ({
+    name: r.name, label: r.name,
+    value: Math.max(r.annual_net_saving, 0),
+    rawValue: r.annual_net_saving,
+    valueLabel: eur(r.annual_net_saving),
+  }));
+  savingsBoxes = drawBars(document.getElementById("savingsChart"), {
+    items: savingsItems, selectedName: selName,
+    axisFmt: (v) => "€" + Math.round(v / 1000) + "k",
+    tip: (it) => `${it.name}<br><b>${eur(it.rawValue)}</b> net / yr`,
+  });
+
+  // Chart 2: payback months per process (status colors by tier)
+  const paybackItems = results.map(r => {
+    const tier = paybackTier(r.payback_months);
+    return {
+      name: r.name, label: r.name,
+      value: r.payback_months === null ? 0 : r.payback_months,
+      valueLabel: payFmt(r.payback_months),
+      zeroLabel: r.payback_months === null ? "never pays back" : null,
+      tierCls: tier.cls,
+    };
+  });
+  paybackBoxes = drawBars(document.getElementById("paybackChart"), {
+    items: paybackItems, selectedName: selName,
+    maxOverride: 24,
+    axisFmt: (v) => num(v, 0) + "mo",
+    colorFor: (it) => c[it.tierCls] || c.series,
+    tip: (it) => `${it.name}<br><b>${it.valueLabel}</b> payback`,
+  });
+}
+
+function renderTable(results) {
+  const ranked = rankResults(results, sortKey);
+  if (sortDir === 1) ranked.reverse();
+
+  document.getElementById("headRow").innerHTML = COLUMNS.map(col => {
+    const active = col.key === sortKey;
+    const arrow = active ? `<span class="arrow">${sortDir === -1 ? "▼" : "▲"}</span>` : "";
+    return `<th data-key="${col.key}">${col.label} ${arrow}</th>`;
+  }).join("");
+  document.querySelectorAll("#headRow th").forEach(th =>
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      if (key === sortKey) { sortDir *= -1; }
+      else { sortKey = key; sortDir = key === "name" ? 1 : -1; }
+      renderTable(computedResults());
+    }));
+
+  const selName = state[selectedIndex].name;
+  document.getElementById("body").innerHTML = ranked.map(r => {
+    const tier = paybackTier(r.payback_months);
+    const cell = (col) => {
+      switch (col.kind) {
+        case "name": return `<span class="chip" style="background:var(--series-1)"></span>${r.name}`;
+        case "eur":  return eur(r[col.key]);
+        case "num":  return num(r[col.key]);
+        case "pct":  return num(r.roi_3y_pct) + "%";
+        case "pay":  return `<span class="pill ${tier.cls}">${payFmt(r.payback_months)}</span>`;
+      }
+    };
+    return `<tr class="${r.name === selName ? "sel" : ""}" data-name="${r.name}">
+      ${COLUMNS.map(col => `<td>${cell(col)}</td>`).join("")}
+    </tr>`;
+  }).join("");
+
+  document.querySelectorAll("#body tr").forEach(tr =>
+    tr.addEventListener("click", () => {
+      selectedIndex = state.findIndex(p => p.name === tr.dataset.name);
+      render();
+    }));
+}
+
+/* ===================== tooltips ==================================== */
+function wireTooltip(canvas, getBoxes, specTipRef) {
+  const tt = document.getElementById("tt");
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const box = getBoxes().find(b => y >= b.y && y <= b.y + b.h);
+    if (!box) { tt.style.opacity = 0; return; }
+    tt.innerHTML = specTipRef(box.item);
+    tt.style.left = (canvas.offsetLeft + x) + "px";
+    tt.style.top  = (canvas.offsetTop + box.y + 6) + "px";
+    tt.style.opacity = 1;
+  });
+  canvas.addEventListener("mouseleave", () => { tt.style.opacity = 0; });
+}
+
+/* ===================== events & boot =============================== */
+document.getElementById("resetOne").addEventListener("click", () => {
+  state[selectedIndex] = structuredClone(SEED[selectedIndex]);
+  render();
+});
+document.getElementById("resetAll").addEventListener("click", () => {
+  state = structuredClone(SEED); selectedIndex = 0; render();
+});
+
+// Theme toggle: stamp data-theme so it wins over OS preference.
+document.getElementById("themeBtn").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const isDark = cur ? cur === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", isDark ? "light" : "dark");
+  renderCharts(computedResults());   // redraw canvas in new theme colors
+});
+
+// Tooltip wiring reads the live spec tip functions via closures.
+wireTooltip(document.getElementById("savingsChart"),
+  () => savingsBoxes, (it) => `${it.name}<br><b>${eur(it.rawValue)}</b> net / yr`);
+wireTooltip(document.getElementById("paybackChart"),
+  () => paybackBoxes, (it) => `${it.name}<br><b>${it.valueLabel}</b> payback`);
+
+window.addEventListener("resize", () => renderCharts(computedResults()));
+render();
+</script>
+</body>
+</html>
