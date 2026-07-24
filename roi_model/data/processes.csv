@@ -1,0 +1,6 @@
+name,annual_volume,minutes_manual,minutes_auto,hourly_wage,coverage,build_cost,monthly_cost
+RFQ email triage,48000,6,1,32,0.70,25000,400
+Invoice matching (3-way),120000,4,0.5,30,0.85,40000,600
+Product-data cleanup,15000,12,3,28,0.60,18000,250
+Returns processing,36000,8,2,29,0.75,30000,450
+Supplier onboarding,2400,45,12,35,0.50,22000,300
