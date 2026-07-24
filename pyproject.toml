@@ -14,6 +14,8 @@ dependencies = []  # core model is standard-library only
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "ruff>=0.4"]
+# Only needed to build the executive one-pager (scripts/make_onepager.py).
+deliverables = ["matplotlib>=3.5"]
 
 [project.scripts]
 roi-model = "roi_model.cli:main"
