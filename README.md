@@ -4,6 +4,8 @@
 
 Picture a COO at a mid-size distributor with budget to automate one back-office process at a time and five teams each certain theirs should go first. Point this at their backlog and it answers the real question with numbers: on the seeded processes it puts invoice matching first — **€171,300/yr net at a 2.8-month payback** — and the full sequenced portfolio frees **13,460 hours and €383,300/yr net**. Build the wrong one first and that gap is the money left on the table.
 
+![Automation ROI Explorer dashboard — portfolio KPIs, per-process assumptions and the net savings / payback charts](docs/img/explorer.png)
+
 Every back-office team has a queue of manual processes they could automate and not enough budget to do all of them. The interesting question isn't "can we automate this" — it's "which one first, and is it actually worth it?" This tool puts numbers on that: hours saved, euros saved, payback period, and 3-year ROI for each candidate, so the backlog gets ranked by value instead of by whoever asked loudest.
 
 **Business case:** [`docs/BUSINESS_CASE.md`](docs/BUSINESS_CASE.md) — the COO scenario, the arithmetic behind every number above, and the ranked portfolio, with a one-page [executive summary PDF](deliverables/executive_onepager.pdf) drawn straight from the model.
