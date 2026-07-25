@@ -22,4 +22,4 @@ using the tool for a real decision.
 
 ## License
 
-Released under the MIT License — see [LICENSE](LICENSE).
+© 2026 Dimitres Kisimov — all rights reserved; third-party libraries remain under their own licenses. See [LICENSE](LICENSE).

@@ -7,7 +7,7 @@ name = "automation-roi-explorer"
 version = "1.0.0"
 description = "Quantify the business case for automating manual back-office processes."
 readme = "README.md"
-license = { text = "MIT" }
+license = { text = "Proprietary" }
 authors = [{ name = "Dimitres Kisimov" }]
 requires-python = ">=3.10"
 dependencies = []  # core model is standard-library only

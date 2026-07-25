@@ -80,4 +80,4 @@ Model dependencies between processes — right now each one is scored in isolati
 
 ---
 
-MIT © 2026 Dimitres Kisimov. Seed data is synthetic.
+© 2026 Dimitres Kisimov — all rights reserved; published for portfolio review. See LICENSE. Seed data is synthetic.
