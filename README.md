@@ -16,7 +16,7 @@ There are two halves and they share one calculation. A stdlib-only Python packag
 
 ## The dashboard, and why the charts are hand-drawn
 
-The dashboard is a single offline HTML file. Open it, adjust a process's sliders (volume, minutes per task, wage, coverage, build and running cost) and the KPIs, charts, and ranked backlog all recompute instantly. No server, no CDN, no internet.
+The dashboard is a single offline HTML file. Open it, adjust a process's sliders (volume, minutes per task, wage, coverage, build and running cost) and the KPIs, charts, and ranked backlog all recompute instantly. No server, no CDN, no internet. Adjusted assumptions survive a refresh (saved in your browser's localStorage only); "Reset all" returns to the seed data. Typed values may exceed the slider ranges — the sliders are a convenience, not a model limit — and the field notes say so when you do.
 
 The one decision I'm glad I made: the bar chart and the payback chart are drawn by hand on a `<canvas>` element. I could have pulled in Chart.js or D3, but that's a dependency, a CDN request, and a chunk of the "offline" promise gone. Drawing the bars, axes, tooltips, and the light/dark theming myself was more code, but the whole thing stays a single file you can double-click. The JavaScript `compute()` mirrors the Python `compute()` line for line, which is what keeps the dashboard and the CLI from ever disagreeing.
 
@@ -34,7 +34,7 @@ python -m roi_model --export-json out.json --export-csv out.csv
 ```
 
 ```
-Automation backlog — ranked by net_benefit_3y (5 processes)
+Automation backlog - ranked by net_benefit_3y (5 processes)
 
 Process                         Hrs/yr    Net EUR/yr   Payback mo    3y ROI %        NPV 3y
 -------------------------------------------------------------------------------------------
@@ -44,7 +44,7 @@ Returns processing               2,700        72,900          4.9       408.4   
 Product-data cleanup             1,350        34,800          6.2       320.0        71,683
 Supplier onboarding                660        19,500         13.5       111.3        28,253
 
-Portfolio total: 13,460 hours/yr, 383,300 EUR/yr net saving
+Portfolio total: 13,460 hours/yr (~7.9 FTE at 1,700 productive h/yr), 383,300 EUR/yr net saving
 ```
 
 Tests:
