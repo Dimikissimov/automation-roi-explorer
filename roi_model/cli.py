@@ -17,10 +17,14 @@ import argparse
 import csv
 import json
 import sys
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 from roi_model.data_load import load_processes
-from roi_model.model import ProcessResult, compute, rank
+from roi_model.model import FTE_HOURS_PER_YEAR, ProcessResult, compute, rank
+
+# Fields the --sort flag accepts (every column on ProcessResult).
+VALID_SORT_FIELDS = tuple(f.name for f in dataclass_fields(ProcessResult))
 
 # Columns shown in the printed backlog and their display headers.
 _TABLE_COLUMNS = (
@@ -105,16 +109,31 @@ def main(argv: list[str] | None = None) -> int:
     """Program entry point. Returns a process exit code."""
     args = build_parser().parse_args(argv)
 
-    processes = load_processes(args.csv)
+    if args.sort not in VALID_SORT_FIELDS:
+        print(f"error: unknown sort field '{args.sort}'. "
+              f"Valid fields: {', '.join(VALID_SORT_FIELDS)}", file=sys.stderr)
+        return 2
+
+    try:
+        processes = load_processes(args.csv)
+    except FileNotFoundError:
+        print(f"error: input CSV not found: {args.csv}", file=sys.stderr)
+        return 2
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
     results = rank([compute(p) for p in processes], key=args.sort)
 
-    print("Automation backlog — ranked by "
+    print("Automation backlog - ranked by "
           f"{args.sort} ({len(results)} processes)\n")
     print(render_table(results))
 
     total_net = sum(r.annual_net_saving for r in results)
     total_hours = sum(r.annual_hours_saved for r in results)
-    print(f"\nPortfolio total: {total_hours:,.0f} hours/yr, "
+    total_fte = total_hours / FTE_HOURS_PER_YEAR
+    print(f"\nPortfolio total: {total_hours:,.0f} hours/yr "
+          f"(~{total_fte:,.1f} FTE at {FTE_HOURS_PER_YEAR:,} productive h/yr), "
           f"{total_net:,.0f} EUR/yr net saving")
 
     if args.export_json:

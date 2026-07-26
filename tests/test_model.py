@@ -98,6 +98,13 @@ def test_ranking_by_payback_puts_fastest_first():
     assert paybacks == sorted(paybacks)
 
 
+def test_ranking_by_name_is_alphabetical():
+    procs = load_processes()
+    results = rank([compute(p) for p in procs], key="name")
+    names = [r.name for r in results]
+    assert names == sorted(names)
+
+
 def test_ranking_pushes_never_payback_to_bottom():
     good = compute(ProcessInput("good", 10000, 10, 1, 30, 1.0, 5000, 100))
     bad = compute(ProcessInput("bad", 0, 10, 1, 30, 1.0, 5000, 100))
@@ -157,6 +164,40 @@ def test_cli_main_runs_and_exports(tmp_path, capsys):
     assert code == 0
     assert "Automation backlog" in out
     assert jpath.exists()
+
+
+def test_cli_portfolio_line_includes_fte_equivalent(capsys):
+    main([])
+    out = capsys.readouterr().out
+    assert "FTE" in out
+    assert "1,700 productive h/yr" in out
+
+
+def test_cli_rejects_unknown_sort_field(capsys):
+    code = main(["--sort", "bogus_key"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "unknown sort field 'bogus_key'" in captured.err
+    assert "payback_months" in captured.err  # lists the valid fields
+    assert "Traceback" not in captured.err
+
+
+def test_cli_missing_input_csv_fails_cleanly(capsys):
+    code = main(["--csv", "no_such_file.csv"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "not found" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_malformed_csv_fails_cleanly(tmp_path, capsys):
+    bad = tmp_path / "bad.csv"
+    bad.write_text("name,annual_volume\nx,10\n", encoding="utf-8")
+    code = main(["--csv", str(bad)])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "missing columns" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_finite_paybacks_are_positive_for_seed_data():

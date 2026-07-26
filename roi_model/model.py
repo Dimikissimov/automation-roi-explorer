@@ -32,6 +32,7 @@ HORIZON_YEARS = 3          # planning horizon for ROI / NPV
 DISCOUNT_RATE = 0.08       # annual discount rate used for NPV
 MONTHS_PER_YEAR = 12
 MINUTES_PER_HOUR = 60
+FTE_HOURS_PER_YEAR = 1700  # productive hours per full-time employee (display only)
 
 
 @dataclass(frozen=True)
@@ -143,10 +144,14 @@ def rank(results: list[ProcessResult],
          key: str = "net_benefit_3y") -> list[ProcessResult]:
     """Return results sorted best-first to form the automation backlog.
 
-    Default key is three-year net benefit (most euros first). Any numeric
-    field name on :class:`ProcessResult` is accepted; ``None`` payback values
-    sort last.
+    Default key is three-year net benefit (most euros first). Any field name
+    on :class:`ProcessResult` is accepted; ``None`` payback values sort last.
+    Best-first means A->Z for ``name``, smallest-first for ``payback_months``,
+    and largest-first for every numeric field.
     """
+    if key == "name":
+        return sorted(results, key=lambda r: r.name)
+
     def sort_value(r: ProcessResult):
         val = getattr(r, key)
         if val is None:
