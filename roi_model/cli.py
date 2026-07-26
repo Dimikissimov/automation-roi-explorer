@@ -9,6 +9,8 @@ Usage:
     python -m roi_model --sort payback_months
     python -m roi_model --export-json out.json
     python -m roi_model --export-csv out.csv
+    python -m roi_model --sensitivity "RFQ email triage"            # tornado, +/-20%
+    python -m roi_model --sensitivity "RFQ email triage" --swing 30
 """
 
 from __future__ import annotations
@@ -21,10 +23,29 @@ from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 from roi_model.data_load import load_processes
-from roi_model.model import FTE_HOURS_PER_YEAR, ProcessResult, compute, rank
+from roi_model.model import (
+    FTE_HOURS_PER_YEAR,
+    ProcessInput,
+    ProcessResult,
+    compute,
+    rank,
+    sensitivity,
+    stress_band,
+)
 
 # Fields the --sort flag accepts (every column on ProcessResult).
 VALID_SORT_FIELDS = tuple(f.name for f in dataclass_fields(ProcessResult))
+
+# Human-readable driver names for the sensitivity report.
+_DRIVER_LABELS = {
+    "annual_volume": "Annual volume",
+    "minutes_manual": "Manual min/task",
+    "minutes_auto": "Automated min/task",
+    "hourly_wage": "Hourly wage",
+    "coverage": "Coverage",
+    "build_cost": "Build cost",
+    "monthly_cost": "Monthly cost",
+}
 
 # Columns shown in the printed backlog and their display headers.
 _TABLE_COLUMNS = (
@@ -88,6 +109,53 @@ def export_csv(results: list[ProcessResult], path: Path) -> None:
         writer.writerows(rows)
 
 
+def _fmt_input(field: str, value: float) -> str:
+    """Format a driver value for the sensitivity table (coverage as %)."""
+    if field == "coverage":
+        return f"{value * 100:,.0f}%"
+    text = f"{value:,.2f}"
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _fmt_payback(months: float | None) -> str:
+    """Payback with its unit, or 'never'."""
+    return "never" if months is None else f"{months:,.1f} mo"
+
+
+def render_sensitivity_report(proc: ProcessInput, swing: float) -> str:
+    """Render the one-way tornado + stress band for one process (ASCII only)."""
+    base = compute(proc)
+    rows = sensitivity(proc, swing)
+    worst, best = stress_band(proc, swing)
+    pct = f"{swing * 100:,.0f}"
+
+    lines: list[str] = []
+    lines.append(f"Sensitivity - {proc.name} (one driver at a time, +/-{pct}%)")
+    lines.append(f"Base: 3y net benefit {base.net_benefit_3y:,.0f} EUR, "
+                 f"payback {_fmt_payback(base.payback_months)}\n")
+
+    header = (f"{'Driver':<20}  {'Pessimistic':>12}  {'Optimistic':>12}  "
+              f"{'3y net benefit range (EUR)':>28}  {'Swing':>12}")
+    lines.append(header)
+    lines.append("-" * len(header))
+    for row in rows:
+        span = f"{row.pessimistic_net_3y:,.0f} .. {row.optimistic_net_3y:,.0f}"
+        lines.append(
+            f"{_DRIVER_LABELS[row.field]:<20}  "
+            f"{_fmt_input(row.field, row.pessimistic_input):>12}  "
+            f"{_fmt_input(row.field, row.optimistic_input):>12}  "
+            f"{span:>28}  {row.swing_eur:>12,.0f}"
+        )
+
+    lines.append("\nStress band - every driver at its bad/good end at once "
+                 "(bounds, not a forecast):")
+    lines.append(f"3y net benefit {worst.net_benefit_3y:,.0f} .. "
+                 f"{best.net_benefit_3y:,.0f} EUR - "
+                 f"payback {_fmt_payback(worst.payback_months)} .. "
+                 f"{_fmt_payback(best.payback_months)}")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser (kept separate so tests can reuse it)."""
     parser = argparse.ArgumentParser(
@@ -102,6 +170,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Also write full results to this JSON file.")
     parser.add_argument("--export-csv", type=Path, default=None,
                         help="Also write full results to this CSV file.")
+    parser.add_argument("--sensitivity", metavar="PROCESS", default=None,
+                        help="Print a one-way (tornado) sensitivity report for the "
+                             "named process instead of the backlog table.")
+    parser.add_argument("--swing", type=float, default=20.0,
+                        help="Sensitivity swing per driver, in percent (default: 20).")
     return parser
 
 
@@ -114,6 +187,11 @@ def main(argv: list[str] | None = None) -> int:
               f"Valid fields: {', '.join(VALID_SORT_FIELDS)}", file=sys.stderr)
         return 2
 
+    if not 0 < args.swing < 100:
+        print(f"error: --swing must be between 0 and 100 (got {args.swing:g}).",
+              file=sys.stderr)
+        return 2
+
     try:
         processes = load_processes(args.csv)
     except FileNotFoundError:
@@ -122,6 +200,16 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
+    if args.sensitivity is not None:
+        match = next((p for p in processes if p.name == args.sensitivity), None)
+        if match is None:
+            names = ", ".join(f"'{p.name}'" for p in processes)
+            print(f"error: unknown process '{args.sensitivity}'. "
+                  f"Valid names: {names}", file=sys.stderr)
+            return 2
+        print(render_sensitivity_report(match, args.swing / 100))
+        return 0
 
     results = rank([compute(p) for p in processes], key=args.sort)
 

@@ -25,7 +25,7 @@ Usage:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 # --- Model-wide assumptions (mirrored verbatim in web/index.html) ------------
 HORIZON_YEARS = 3          # planning horizon for ROI / NPV
@@ -138,6 +138,107 @@ def compute(proc: ProcessInput, horizon_years: int = HORIZON_YEARS,
         roi_3y_pct=round(roi_3y_pct, 2),
         npv_3y=round(npv_3y, 2),
     )
+
+
+# --- Sensitivity: "what moves the number" ------------------------------------
+SENSITIVITY_SWING = 0.20   # default one-at-a-time swing: +/-20% of each input
+
+# Every input sensitivity() varies, mapped to the direction that makes the
+# business case WORSE. "low" fields hurt when the base assumption was
+# optimistic (less volume, less coverage, cheaper labour, a faster manual
+# task than claimed); "high" fields hurt when costs or residual effort
+# overrun. Insertion order is the tie-break order for equal swings.
+_PESSIMISTIC_DIRECTION = {
+    "annual_volume": "low",
+    "minutes_manual": "low",
+    "minutes_auto": "high",
+    "hourly_wage": "low",
+    "coverage": "low",
+    "build_cost": "high",
+    "monthly_cost": "high",
+}
+
+
+@dataclass(frozen=True)
+class SensitivityRow:
+    """Outcome range when ONE input moves +/-swing while the rest stay put.
+
+    ``pessimistic_net_3y`` <= base <= ``optimistic_net_3y`` always holds:
+    the model is monotone in every driver.
+    """
+
+    field: str
+    pessimistic_input: float
+    optimistic_input: float
+    pessimistic_net_3y: float
+    optimistic_net_3y: float
+
+    @property
+    def swing_eur(self) -> float:
+        """Total width of the outcome range (the tornado bar length)."""
+        return round(self.optimistic_net_3y - self.pessimistic_net_3y, 2)
+
+
+def _shifted(proc: ProcessInput, field: str, factor: float) -> float:
+    """One input scaled by ``factor``; coverage is a fraction, capped at 1."""
+    value = getattr(proc, field) * factor
+    if field == "coverage":
+        value = min(value, 1.0)
+    return round(value, 6)
+
+
+def sensitivity(proc: ProcessInput, swing: float = SENSITIVITY_SWING,
+                horizon_years: int = HORIZON_YEARS,
+                discount_rate: float = DISCOUNT_RATE) -> list[SensitivityRow]:
+    """One-way (tornado) sensitivity of the 3-year net benefit.
+
+    Each driver in ``_PESSIMISTIC_DIRECTION`` is moved down and up by
+    ``swing`` (a fraction of its current value, default 0.20 = +/-20%)
+    while every other input keeps its value; the metric is
+    ``net_benefit_3y``. Rows come back widest-swing first — the classic
+    tornado ordering; ties keep the field-definition order (stable sort).
+
+    These are stress bounds on the CURRENT assumptions, not statistical
+    confidence intervals: the +/-swing is itself an assumption.
+    """
+    rows: list[SensitivityRow] = []
+    for field, direction in _PESSIMISTIC_DIRECTION.items():
+        pess_factor = 1 - swing if direction == "low" else 1 + swing
+        opt_factor = 1 + swing if direction == "low" else 1 - swing
+        pess_value = _shifted(proc, field, pess_factor)
+        opt_value = _shifted(proc, field, opt_factor)
+        pess = compute(replace(proc, **{field: pess_value}), horizon_years, discount_rate)
+        opt = compute(replace(proc, **{field: opt_value}), horizon_years, discount_rate)
+        rows.append(SensitivityRow(
+            field=field,
+            pessimistic_input=pess_value,
+            optimistic_input=opt_value,
+            pessimistic_net_3y=pess.net_benefit_3y,
+            optimistic_net_3y=opt.net_benefit_3y,
+        ))
+    rows.sort(key=lambda r: abs(r.optimistic_net_3y - r.pessimistic_net_3y), reverse=True)
+    return rows
+
+
+def stress_band(proc: ProcessInput, swing: float = SENSITIVITY_SWING,
+                horizon_years: int = HORIZON_YEARS,
+                discount_rate: float = DISCOUNT_RATE,
+                ) -> tuple[ProcessResult, ProcessResult]:
+    """(worst, best) case with EVERY driver at its bad/good end at once.
+
+    A deliberate stress test bracketing the one-way rows — the ends
+    compound, so this is a bound, not a forecast.
+    """
+    worst_values = {}
+    best_values = {}
+    for field, direction in _PESSIMISTIC_DIRECTION.items():
+        pess_factor = 1 - swing if direction == "low" else 1 + swing
+        opt_factor = 1 + swing if direction == "low" else 1 - swing
+        worst_values[field] = _shifted(proc, field, pess_factor)
+        best_values[field] = _shifted(proc, field, opt_factor)
+    worst = compute(replace(proc, **worst_values), horizon_years, discount_rate)
+    best = compute(replace(proc, **best_values), horizon_years, discount_rate)
+    return worst, best
 
 
 def rank(results: list[ProcessResult],

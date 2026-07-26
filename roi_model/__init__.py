@@ -1,7 +1,8 @@
 """roi_model — quantify the business case for automating manual processes.
 
 Public API:
-    ProcessInput, ProcessResult, compute, rank   (from roi_model.model)
+    ProcessInput, ProcessResult, compute, rank    (from roi_model.model)
+    SensitivityRow, sensitivity, stress_band      (from roi_model.model)
     load_processes                                (from roi_model.data_load)
 
 Example:
@@ -12,13 +13,24 @@ Example:
 """
 
 from roi_model.data_load import load_processes
-from roi_model.model import ProcessInput, ProcessResult, compute, rank
+from roi_model.model import (
+    ProcessInput,
+    ProcessResult,
+    SensitivityRow,
+    compute,
+    rank,
+    sensitivity,
+    stress_band,
+)
 
 __all__ = [
     "ProcessInput",
     "ProcessResult",
+    "SensitivityRow",
     "compute",
     "rank",
+    "sensitivity",
+    "stress_band",
     "load_processes",
 ]
 

@@ -11,7 +11,7 @@ import math
 
 import pytest
 
-from roi_model import compute, load_processes, rank
+from roi_model import compute, load_processes, rank, sensitivity, stress_band
 from roi_model.cli import export_csv, export_json, main, render_table
 from roi_model.model import ProcessInput
 
@@ -206,3 +206,98 @@ def test_finite_paybacks_are_positive_for_seed_data():
         if r.payback_months is not None:
             assert r.payback_months > 0
             assert math.isfinite(r.payback_months)
+
+
+# --- sensitivity ("what moves the number") -----------------------------------
+
+def test_sensitivity_covers_every_driver_widest_first():
+    rows = sensitivity(RFQ)
+    assert len(rows) == 7
+    swings = [row.swing_eur for row in rows]
+    assert swings == sorted(swings, reverse=True)
+    # Manual minutes swing widest for RFQ: +/-1.2 min moves the 5 saved
+    # minutes by +/-24%, more than the +/-20% linear drivers.
+    assert rows[0].field == "minutes_manual"
+
+
+def test_sensitivity_coverage_row_matches_hand_math():
+    # coverage 0.70 -> 0.56 / 0.84 at the default +/-20% swing:
+    #   pessimistic: 26,880 tasks * 5 min / 60 = 2,240 h -> 71,680 gross
+    #     -> 66,880 net -> 3y net benefit 66,880*3 - 25,000 = 175,640
+    #   optimistic:  40,320 tasks -> 3,360 h -> 107,520 gross
+    #     -> 102,720 net -> 3y net benefit 283,160
+    row = next(r for r in sensitivity(RFQ) if r.field == "coverage")
+    assert row.pessimistic_input == pytest.approx(0.56)
+    assert row.optimistic_input == pytest.approx(0.84)
+    assert row.pessimistic_net_3y == pytest.approx(175640, abs=1)
+    assert row.optimistic_net_3y == pytest.approx(283160, abs=1)
+    assert row.swing_eur == pytest.approx(107520, abs=1)
+
+
+def test_sensitivity_pessimistic_never_beats_optimistic():
+    for swing in (0.1, 0.2, 0.3):
+        for row in sensitivity(RFQ, swing):
+            assert row.pessimistic_net_3y <= row.optimistic_net_3y
+
+
+def test_sensitivity_caps_optimistic_coverage_at_full():
+    proc = ProcessInput("High coverage", 10000, 10, 1, 30, 0.9, 5000, 100)
+    row = next(r for r in sensitivity(proc) if r.field == "coverage")
+    assert row.optimistic_input == 1.0  # 0.9 * 1.2 would be 108%
+
+
+def test_stress_band_brackets_base_and_every_one_way_row():
+    worst, best = stress_band(RFQ)
+    base = compute(RFQ)
+    assert worst.net_benefit_3y < base.net_benefit_3y < best.net_benefit_3y
+    for row in sensitivity(RFQ):
+        assert worst.net_benefit_3y <= row.pessimistic_net_3y
+        assert best.net_benefit_3y >= row.optimistic_net_3y
+
+
+def test_stress_band_matches_hand_math():
+    # Worst: 38,400 * 0.56 = 21,504 tasks * 3.6 min / 60 = 1,290.24 h
+    #   * 25.6 EUR = 33,030.14 gross - 5,760 running = 27,270.14 net
+    #   -> 3y net benefit 81,810.43 - 30,000 = 51,810.43
+    worst, best = stress_band(RFQ)
+    assert worst.net_benefit_3y == pytest.approx(51810.43, abs=0.5)
+    assert best.net_benefit_3y == pytest.approx(563022.59, abs=0.5)
+    assert worst.payback_months == pytest.approx(13.2, abs=0.05)
+    assert best.payback_months == pytest.approx(1.23, abs=0.01)
+
+
+def test_cli_sensitivity_report(capsys):
+    code = main(["--sensitivity", "RFQ email triage"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Sensitivity - RFQ email triage" in out
+    assert "+/-20%" in out
+    assert "Manual min/task" in out
+    assert "Stress band" in out
+    assert "not a forecast" in out
+    # Sensitivity mode replaces the backlog table.
+    assert "Automation backlog" not in out
+
+
+def test_cli_sensitivity_honors_swing(capsys):
+    code = main(["--sensitivity", "RFQ email triage", "--swing", "30"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "+/-30%" in out
+
+
+def test_cli_sensitivity_unknown_process_fails_cleanly(capsys):
+    code = main(["--sensitivity", "No such process"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "unknown process 'No such process'" in captured.err
+    assert "RFQ email triage" in captured.err  # lists the valid names
+    assert "Traceback" not in captured.err
+
+
+def test_cli_rejects_out_of_range_swing(capsys):
+    code = main(["--sensitivity", "RFQ email triage", "--swing", "150"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--swing" in captured.err
+    assert "Traceback" not in captured.err
