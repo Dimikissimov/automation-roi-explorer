@@ -151,6 +151,18 @@
         box-shadow: var(--shadow); z-index: 5; }
   .tt b { font-variant-numeric: tabular-nums; }
 
+  /* Sensitivity chart header + swing control */
+  .chart-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+  .swing { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+  .swing select { font: inherit; font-size: 12.5px; color: var(--ink); background: var(--page);
+                  border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px;
+                  cursor: pointer; }
+  .sens-band { color: var(--ink-2); font-size: 12.5px; margin-top: 8px; }
+  .sens-band b { font-variant-numeric: tabular-nums; }
+
+  /* Scenario export buttons */
+  .export-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+
   /* Ranked table */
   .table-scroll { overflow-x: auto; margin-top: 10px; }
   table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
@@ -181,6 +193,23 @@
   @media (max-width: 860px) {
     .kpis { grid-template-columns: repeat(2, 1fr); }
     .grid { grid-template-columns: 1fr; }
+  }
+
+  /* Print one-pager: hidden on screen; printing swaps the app out for it. */
+  .print-page { display: none; }
+  @media print {
+    body { background: #fff; color: #000; }
+    header.top, .kpis, .grid, footer { display: none !important; }
+    .wrap { max-width: none; padding: 0; }
+    .print-page { display: block; color: #000; font-size: 12px; }
+    .print-page h1 { font-size: 20px; margin-bottom: 6px; }
+    .print-page h2 { font-size: 12.5px; margin: 14px 0 6px; text-transform: uppercase;
+                     letter-spacing: .05em; }
+    .print-page table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    .print-page th, .print-page td { border: 1px solid #bbb; padding: 4px 6px;
+                                     text-align: right; white-space: nowrap; }
+    .print-page th:first-child, .print-page td:first-child { text-align: left; }
+    .print-page .print-note { color: #444; font-size: 10.5px; margin-top: 12px; }
   }
 </style>
 </head>
@@ -235,6 +264,22 @@
           </div>
           <canvas id="paybackChart" height="0"></canvas>
         </div>
+        <div class="chart-wrap">
+          <div class="chart-head">
+            <div class="chart-title">Sensitivity — what moves the number
+              <span class="hint" id="sensHint"></span>
+            </div>
+            <label class="swing">Swing
+              <select id="swingSel" aria-label="Sensitivity swing per driver">
+                <option value="0.1">±10%</option>
+                <option value="0.2" selected>±20%</option>
+                <option value="0.3">±30%</option>
+              </select>
+            </label>
+          </div>
+          <canvas id="sensChart" height="0"></canvas>
+          <div class="sens-band" id="sensBand"></div>
+        </div>
         <div class="tt" id="tt"></div>
       </section>
 
@@ -247,14 +292,32 @@
           </table>
         </div>
       </section>
+
+      <section class="card" aria-label="Scenario export">
+        <h2>Take the scenario with you
+          <span class="hint">Exports reflect the assumptions exactly as set above and are generated
+            locally — nothing leaves this page. The seed figures are synthetic; swap in your own
+            numbers before circulating.</span>
+        </h2>
+        <div class="export-actions">
+          <button class="btn" id="copySummary" type="button">Copy summary</button>
+          <button class="btn" id="dlCsv" type="button">Download CSV</button>
+          <button class="btn" id="dlJson" type="button">Download JSON</button>
+          <button class="btn" id="printBtn" type="button">Print one-pager</button>
+        </div>
+      </section>
     </main>
   </div>
+
+  <div class="print-page" id="printPage" aria-hidden="true"></div>
 
   <footer>
     Synthetic data · © 2026 Dimitres Kisimov, all rights reserved (portfolio review — see LICENSE) ·
     Model horizon 3 years, discount rate 8% · FTE ≈ 1,700 productive hours/yr ·
     Your edits are saved in this browser only (localStorage); “Reset all” returns to the seed data ·
-    The CLI equivalent is <code>python -m roi_model</code>.
+    Exports and the print one-pager are generated locally — nothing leaves this page ·
+    The CLI equivalent is <code>python -m roi_model</code>
+    (sensitivity: <code>--sensitivity "Process name"</code>).
   </footer>
 </div>
 
@@ -342,6 +405,59 @@ function rankResults(results, key) {
   return arr;
 }
 
+// --- Sensitivity: "what moves the number" (mirror model.sensitivity) --
+const SENSITIVITY_SWING = 0.20;   // default one-at-a-time swing: ±20%
+
+// Direction that makes the business case WORSE for each driver (mirror
+// model._PESSIMISTIC_DIRECTION — insertion order breaks swing ties).
+const PESSIMISTIC_DIRECTION = {
+  annual_volume: "low", minutes_manual: "low", minutes_auto: "high",
+  hourly_wage: "low", coverage: "low", build_cost: "high", monthly_cost: "high",
+};
+
+const round6 = (x) => Math.round(x * 1e6) / 1e6;
+
+// One input scaled by factor; coverage is a fraction, capped at 1.
+function shiftedInput(p, key, factor) {
+  let v = p[key] * factor;
+  if (key === "coverage") v = Math.min(v, 1);
+  return round6(v);
+}
+
+// One-way (tornado) sensitivity of the 3-year net benefit: each driver
+// moves ±swing on its own while the rest stay put; rows come back
+// widest-swing first (stable sort keeps definition order on ties).
+// These are stress bounds on the current assumptions, NOT statistical
+// confidence intervals — the ±swing is itself an assumption.
+function sensitivity(p, swing) {
+  const rows = Object.entries(PESSIMISTIC_DIRECTION).map(([key, dir]) => {
+    const pessInput = shiftedInput(p, key, dir === "low" ? 1 - swing : 1 + swing);
+    const optInput  = shiftedInput(p, key, dir === "low" ? 1 + swing : 1 - swing);
+    return {
+      field: key,
+      pessimisticInput: pessInput,
+      optimisticInput: optInput,
+      pessimisticNet3y: compute({ ...p, [key]: pessInput }).net_benefit_3y,
+      optimisticNet3y:  compute({ ...p, [key]: optInput }).net_benefit_3y,
+    };
+  });
+  rows.sort((a, b) => Math.abs(b.optimisticNet3y - b.pessimisticNet3y)
+                    - Math.abs(a.optimisticNet3y - a.pessimisticNet3y));
+  return rows;
+}
+
+// {worst, best} with EVERY driver at its bad/good end at once (mirror
+// model.stress_band) — a stress test bracketing the one-way rows,
+// deliberately compounded, so it is a bound and not a forecast.
+function stressBand(p, swing) {
+  const worst = { ...p }, best = { ...p };
+  for (const [key, dir] of Object.entries(PESSIMISTIC_DIRECTION)) {
+    worst[key] = shiftedInput(p, key, dir === "low" ? 1 - swing : 1 + swing);
+    best[key]  = shiftedInput(p, key, dir === "low" ? 1 + swing : 1 - swing);
+  }
+  return { worst: compute(worst), best: compute(best) };
+}
+
 /* ===================== formatting helpers ========================== */
 // Negative amounts read "-€60,000", not "€-60,000".
 const eur = (x) => {
@@ -350,6 +466,12 @@ const eur = (x) => {
 };
 const num = (x, d = 0) => Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const payFmt = (m) => m === null ? "never" : num(m, 1) + " mo";
+// Compact axis money: "€108k", one decimal below €10k so small swings stay readable.
+const eurK = (x) => {
+  const k = x / 1000;
+  const r = Math.abs(k) < 10 ? Math.round(k * 10) / 10 : Math.round(k);
+  return (r < 0 ? "-€" : "€") + Math.abs(r).toLocaleString("en-US") + "k";
+};
 
 // Payback tier -> status class (good / warning / serious / critical / never)
 function paybackTier(m) {
@@ -365,6 +487,7 @@ let state = structuredClone(SEED);   // editable working copy
 let selectedIndex = 0;               // which process the editor targets
 let sortKey = "net_benefit_3y";      // backlog sort column
 let sortDir = -1;                    // -1 best-first, 1 reversed
+let sensSwing = SENSITIVITY_SWING;   // ±swing per driver in the tornado
 
 /* ---- scenario persistence (this browser only, offline) ------------- */
 // Adjusted assumptions survive a refresh via localStorage. "Reset all"
@@ -372,7 +495,8 @@ let sortDir = -1;                    // -1 best-first, 1 reversed
 const STORE_KEY = "automation-roi-explorer.scenario.v1";
 function saveState() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ state, selectedIndex }));
+    localStorage.setItem(STORE_KEY,
+      JSON.stringify({ state, selectedIndex, swing: sensSwing }));
   } catch (e) { /* storage unavailable (e.g. blocked) — run in-memory only */ }
 }
 function clearSavedState() {
@@ -389,6 +513,7 @@ function loadSavedState() {
     if (!valid) return;
     state = data.state;
     selectedIndex = Math.min(Math.max(Number(data.selectedIndex) || 0, 0), state.length - 1);
+    if ([0.1, 0.2, 0.3].includes(data.swing)) sensSwing = data.swing;
   } catch (e) { /* corrupt/unreadable saved scenario — fall back to seed */ }
 }
 
@@ -521,8 +646,86 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+/* ===================== tornado sensitivity chart =================== */
+// Horizontal outcome-range bars around a dashed base-value line: the
+// pessimistic side is painted --serious, the optimistic side --series-1.
+// Same row geometry as drawBars; returns hit-boxes for tooltips.
+function drawTornado(canvas, spec) {
+  const c = chartColors();
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 600;
+  const rowH = 34, padTop = 8, padBottom = 22;
+  const cssH = padTop + spec.items.length * rowH + padBottom;
+
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  canvas.style.height = cssH + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  ctx.font = "12px system-ui, -apple-system, 'Segoe UI', sans-serif";
+
+  const labelW = 150, valueW = 74;
+  const x0 = labelW, x1 = cssW - valueW;
+  const plotW = Math.max(x1 - x0, 40);
+  let lo = Math.min(spec.base, ...spec.items.map(i => i.lo));
+  let hi = Math.max(spec.base, ...spec.items.map(i => i.hi));
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }   // flat outcomes (e.g. all-zero process)
+  const xFor = (v) => x0 + ((v - lo) / (hi - lo)) * plotW;
+
+  // gridlines (recessive) + tick labels across the outcome domain
+  ctx.strokeStyle = c.grid; ctx.lineWidth = 1;
+  const ticks = 4;
+  for (let t = 0; t <= ticks; t++) {
+    const val = lo + ((hi - lo) * t) / ticks;
+    const gx = xFor(val);
+    ctx.beginPath(); ctx.moveTo(gx + .5, padTop); ctx.lineTo(gx + .5, cssH - padBottom); ctx.stroke();
+    ctx.fillStyle = c.muted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(spec.axisFmt(val), gx, cssH - padBottom + 6);
+  }
+
+  const boxes = [];
+  spec.items.forEach((it, i) => {
+    const yTop = padTop + i * rowH;
+    const cy = yTop + rowH / 2;
+    const bh = 16;
+
+    // driver label
+    ctx.fillStyle = c.ink2;
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(truncate(ctx, it.label, labelW - 12), 0, cy);
+
+    const xL = xFor(it.lo), xR = xFor(it.hi), xB = xFor(spec.base);
+    const w = Math.max(xR - xL, 2);
+    // full bar in the optimistic color, then overpaint left of base
+    ctx.fillStyle = c.series;
+    roundRect(ctx, xL, cy - bh / 2, w, bh, 4); ctx.fill();
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x0, cy - bh / 2, Math.max(xB - x0, 0), bh); ctx.clip();
+    ctx.fillStyle = c.serious;
+    roundRect(ctx, xL, cy - bh / 2, w, bh, 4); ctx.fill();
+    ctx.restore();
+
+    // range width at the row end
+    ctx.fillStyle = c.ink2;
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(it.valueLabel, cssW, cy);
+
+    boxes.push({ x: 0, y: yTop, w: cssW, h: rowH, item: it });
+  });
+
+  // dashed base-value line on top of the bars
+  const xB = xFor(spec.base);
+  ctx.strokeStyle = c.ink2; ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(xB, padTop); ctx.lineTo(xB, cssH - padBottom); ctx.stroke();
+  ctx.setLineDash([]);
+
+  return boxes;
+}
+
 /* ===================== render pipeline ============================= */
-let savingsBoxes = [], paybackBoxes = [];
+let savingsBoxes = [], paybackBoxes = [], sensBoxes = [];
 
 function computedResults() {
   return state.map(compute);
@@ -540,26 +743,32 @@ function render() {
   renderTable(results);
 }
 
-function renderKPIs(results) {
+// Portfolio totals across all processes — shared by the KPI tiles, the
+// scenario exports and the print one-pager so they can never disagree.
+function portfolio(results) {
   const totalHours = results.reduce((s, r) => s + r.annual_hours_saved, 0);
   const totalNet   = results.reduce((s, r) => s + r.annual_net_saving, 0);
   const totalBuild = state.reduce((s, p) => s + p.build_cost, 0);
   const totalCost3y = state.reduce((s, p) => s + p.build_cost + p.monthly_cost * 12 * HORIZON_YEARS, 0);
   const netBenefit3y = results.reduce((s, r) => s + r.net_benefit_3y, 0);
-  const portfolioRoi = totalCost3y > 0 ? (netBenefit3y / totalCost3y) * 100 : 0;
+  const roi = totalCost3y > 0 ? (netBenefit3y / totalCost3y) * 100 : 0;
   // Blended payback: total build cost / total monthly net saving.
   const monthlyNet = totalNet / 12;
   const blendedPayback = monthlyNet > 0 ? totalBuild / monthlyNet : null;
+  return { totalHours, totalNet, totalBuild, netBenefit3y, roi, blendedPayback,
+           fte: totalHours / FTE_HOURS_PER_YEAR };
+}
 
-  const totalFte = totalHours / FTE_HOURS_PER_YEAR;
+function renderKPIs(results) {
+  const port = portfolio(results);
   const tiles = [
-    { label: "Portfolio hours / yr", value: num(totalHours),
-      unit: `all ${results.length} processes · ≈ ${num(totalFte, 1)} FTE` },
-    { label: "Portfolio net € / yr", value: eur(totalNet),
+    { label: "Portfolio hours / yr", value: num(port.totalHours),
+      unit: `all ${results.length} processes · ≈ ${num(port.fte, 1)} FTE` },
+    { label: "Portfolio net € / yr", value: eur(port.totalNet),
       unit: "all processes, after running costs" },
-    { label: "Blended payback",      value: payFmt(blendedPayback),
+    { label: "Blended payback",      value: payFmt(port.blendedPayback),
       unit: "across the portfolio" },
-    { label: "Portfolio 3-year ROI", value: num(portfolioRoi) + "%",
+    { label: "Portfolio 3-year ROI", value: num(port.roi) + "%",
       unit: "return on total spend" },
   ];
   document.getElementById("kpis").innerHTML = tiles.map(t => `
@@ -694,6 +903,45 @@ function renderCharts(results) {
     colorFor: (it) => c[it.tierCls] || c.series,
     tip: (it) => `${it.name}<br><b>${it.valueLabel}</b> payback`,
   });
+
+  renderSensitivity();
+}
+
+// Driver input formatted for the tornado tooltip; wage keeps its cents
+// so a ±20% shift (e.g. €25.60/h) is not rounded into a lie.
+const FIELD_BY_KEY = Object.fromEntries(FIELDS.map(f => [f.key, f]));
+function fmtDriverInput(f, v) {
+  return f.key === "hourly_wage" ? "€" + num(v, 2) + "/h" : f.fmt(v);
+}
+
+function renderSensitivity() {
+  const p = state[selectedIndex];
+  const base = compute(p).net_benefit_3y;
+  const rows = sensitivity(p, sensSwing);
+  const pct = Math.round(sensSwing * 100);
+
+  const items = rows.map(r => {
+    const f = FIELD_BY_KEY[r.field];
+    return {
+      label: f.label, lo: r.pessimisticNet3y, hi: r.optimisticNet3y,
+      pessTxt: fmtDriverInput(f, r.pessimisticInput),
+      optTxt: fmtDriverInput(f, r.optimisticInput),
+      valueLabel: eurK(r.optimisticNet3y - r.pessimisticNet3y) + " wide",
+    };
+  });
+  sensBoxes = drawTornado(document.getElementById("sensChart"),
+    { items, base, axisFmt: eurK });
+
+  document.getElementById("sensHint").textContent =
+    `${p.name}: each driver moved ±${pct}% on its own — bars span the 3-year net € outcome ` +
+    `(orange end pessimistic, blue optimistic, dashed line = current assumptions). ` +
+    `Stress bounds, not confidence intervals.`;
+
+  const { worst, best } = stressBand(p, sensSwing);
+  document.getElementById("sensBand").innerHTML =
+    `All drivers at their bad / good ends at once (a stress test, not a forecast): ` +
+    `3-year net € <b>${eur(worst.net_benefit_3y)}</b> … <b>${eur(best.net_benefit_3y)}</b> · ` +
+    `payback <b>${payFmt(worst.payback_months)}</b> … <b>${payFmt(best.payback_months)}</b>`;
 }
 
 function renderTable(results) {
@@ -743,6 +991,170 @@ function renderTable(results) {
     }));
 }
 
+/* ===================== scenario export ============================= */
+// Everything below is generated locally from the current state — no
+// network, no timestamps: the same scenario always exports byte-identical
+// files, and the numbers are the ones on screen.
+const RESULT_KEYS = ["automated_volume", "annual_hours_saved", "annual_gross_saving",
+  "annual_running_cost", "annual_net_saving", "payback_months", "net_benefit_3y",
+  "roi_3y_pct", "npv_3y"];
+
+// Processes paired with their results, in the order the backlog table shows.
+function scenarioRows() {
+  const ranked = rankResults(computedResults(), sortKey);
+  if (sortDir === 1) ranked.reverse();
+  return ranked.map(r => ({
+    inputs: state.find(p => p.name === r.name),
+    results: r,
+  }));
+}
+
+// A "never pays back" null becomes an empty CSV cell, matching the CLI export.
+const csvCell = (v) => {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+
+function scenarioCsv() {
+  const header = ["name", ...FIELDS.map(f => f.key), ...RESULT_KEYS];
+  const lines = [header.join(",")];
+  for (const { inputs, results } of scenarioRows()) {
+    lines.push([
+      csvCell(inputs.name),
+      ...FIELDS.map(f => csvCell(inputs[f.key])),
+      ...RESULT_KEYS.map(k => csvCell(results[k])),
+    ].join(","));
+  }
+  return lines.join("\r\n") + "\r\n";
+}
+
+function scenarioJson() {
+  const results = computedResults();
+  const port = portfolio(results);
+  return JSON.stringify({
+    tool: "automation-roi-explorer",
+    note: "Assumption-driven estimates, not measurements. The seed data is synthetic; " +
+          "results reflect whatever assumptions were set in the dashboard.",
+    model: { horizon_years: HORIZON_YEARS, discount_rate: DISCOUNT_RATE,
+             fte_hours_per_year: FTE_HOURS_PER_YEAR },
+    processes: scenarioRows().map(({ inputs, results: r }) =>
+      ({ assumptions: { ...inputs }, results: r })),
+    portfolio: {
+      annual_hours_saved: round2(port.totalHours),
+      annual_net_saving: round2(port.totalNet),
+      blended_payback_months: port.blendedPayback === null ? null : round2(port.blendedPayback),
+      net_benefit_3y: round2(port.netBenefit3y),
+      roi_3y_pct: round2(port.roi),
+      fte_equivalent: round2(port.fte),
+    },
+  }, null, 2);
+}
+
+function downloadFile(filename, mime, text) {
+  const a = document.createElement("a");
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Plain-text summary of the selected process + portfolio, ready to paste
+// into an email or a slide's speaker notes.
+function summaryText() {
+  const p = state[selectedIndex];
+  const r = compute(p);
+  const port = portfolio(computedResults());
+  const { worst, best } = stressBand(p, sensSwing);
+  const pct = Math.round(sensSwing * 100);
+  const ratePct = Math.round(DISCOUNT_RATE * 100);
+  return [
+    `Automation ROI scenario — ${p.name}`,
+    `Assumptions: ${num(p.annual_volume)} tasks/yr · ${num(p.minutes_manual, 1)} → ` +
+      `${num(p.minutes_auto, 1)} min/task · wage €${num(p.hourly_wage, 2)}/h · ` +
+      `coverage ${num(p.coverage * 100)}% · build ${eur(p.build_cost)} · running ${eur(p.monthly_cost)}/mo`,
+    `Result: ${num(r.annual_hours_saved)} h/yr (≈ ${num(r.annual_hours_saved / FTE_HOURS_PER_YEAR, 1)} FTE) · ` +
+      `net ${eur(r.annual_net_saving)}/yr · payback ${payFmt(r.payback_months)} · ` +
+      `3y ROI ${num(r.roi_3y_pct)}% · NPV 3y @ ${ratePct}% ${eur(r.npv_3y)}`,
+    `Stress band (every driver ±${pct}% at once — bounds, not a forecast): ` +
+      `3y net € ${eur(worst.net_benefit_3y)} … ${eur(best.net_benefit_3y)}`,
+    `Portfolio (${state.length} processes): ${num(port.totalHours)} h/yr · net ${eur(port.totalNet)}/yr · ` +
+      `blended payback ${payFmt(port.blendedPayback)} · 3y ROI ${num(port.roi)}%`,
+    `Model: ${HORIZON_YEARS}-year horizon, ${ratePct}% discount rate. ` +
+      `Estimates from user-set assumptions; the seed data is synthetic.`,
+  ].join("\n");
+}
+
+function copySummary() {
+  const text = summaryText();
+  const btn = document.getElementById("copySummary");
+  const flash = (msg) => {
+    btn.textContent = msg;
+    setTimeout(() => { btn.textContent = "Copy summary"; }, 1600);
+  };
+  const fallback = () => {
+    // Clipboard API unavailable or blocked: select-and-copy a hidden textarea.
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { /* stays false */ }
+    ta.remove();
+    flash(ok ? "Copied ✓" : "Copy failed");
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => flash("Copied ✓"), fallback);
+  } else { fallback(); }
+}
+
+/* ===================== print one-pager ============================= */
+// Hidden on screen; @media print swaps the app out for this summary.
+// Rebuilt on every print so it always matches the current assumptions.
+function buildPrintPage() {
+  const results = rankResults(computedResults(), "net_benefit_3y");
+  const port = portfolio(computedResults());
+  const p = state[selectedIndex];
+  const { worst, best } = stressBand(p, sensSwing);
+  const pct = Math.round(sensSwing * 100);
+  const inputsOf = Object.fromEntries(state.map(pr => [pr.name, pr]));
+
+  const rowsHtml = results.map(r => {
+    const i = inputsOf[r.name];
+    return `<tr>
+      <td>${r.name}</td><td>${num(i.annual_volume)}</td>
+      <td>${num(i.minutes_manual, 1)} → ${num(i.minutes_auto, 1)}</td>
+      <td>€${num(i.hourly_wage, 2)}</td><td>${num(i.coverage * 100)}%</td>
+      <td>${eur(i.build_cost)}</td><td>${eur(i.monthly_cost)}</td>
+      <td>${num(r.annual_hours_saved)}</td><td>${eur(r.annual_net_saving)}</td>
+      <td>${payFmt(r.payback_months)}</td><td>${num(r.roi_3y_pct)}%</td><td>${eur(r.npv_3y)}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("printPage").innerHTML = `
+    <h1>Automation ROI — scenario one-pager</h1>
+    <p>Portfolio of ${state.length} candidate processes: <b>${num(port.totalHours)} hours/yr</b>
+      (≈ ${num(port.fte, 1)} FTE at ${num(FTE_HOURS_PER_YEAR)} productive h/yr) ·
+      net <b>${eur(port.totalNet)}/yr</b> · blended payback <b>${payFmt(port.blendedPayback)}</b> ·
+      3-year ROI <b>${num(port.roi)}%</b>.</p>
+    <h2>Backlog — ranked by 3-year net benefit</h2>
+    <table>
+      <thead><tr><th>Process</th><th>Vol/yr</th><th>Min man→auto</th><th>Wage</th>
+        <th>Coverage</th><th>Build</th><th>€/mo</th><th>Hours/yr</th><th>Net €/yr</th>
+        <th>Payback</th><th>3y ROI</th><th>NPV 3y</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <h2>Sensitivity — ${p.name}</h2>
+    <p>Every driver moved ±${pct}% at once (stress bounds, not a forecast):
+      3-year net € <b>${eur(worst.net_benefit_3y)} … ${eur(best.net_benefit_3y)}</b> ·
+      payback <b>${payFmt(worst.payback_months)} … ${payFmt(best.payback_months)}</b>.</p>
+    <p class="print-note">Assumption-driven estimates, not measurements — the seed data is
+      synthetic; swap in your own numbers before circulating. Savings assume freed hours
+      become real money (redeployed staff, avoided hires, less overtime). Model:
+      ${HORIZON_YEARS}-year horizon, ${Math.round(DISCOUNT_RATE * 100)}% discount rate,
+      volumes and wages held flat. Generated locally by Automation ROI Explorer (offline).</p>`;
+}
+
 /* ===================== tooltips ==================================== */
 function wireTooltip(canvas, getBoxes, specTipRef) {
   const tt = document.getElementById("tt");
@@ -770,6 +1182,8 @@ document.getElementById("resetOne").addEventListener("click", () => {
 });
 document.getElementById("resetAll").addEventListener("click", () => {
   state = structuredClone(SEED); selectedIndex = 0;
+  sensSwing = SENSITIVITY_SWING;
+  document.getElementById("swingSel").value = String(sensSwing);
   clearSavedState();
   render();
 });
@@ -783,14 +1197,37 @@ document.getElementById("themeBtn").addEventListener("click", () => {
   renderCharts(computedResults());   // redraw canvas in new theme colors
 });
 
+// Sensitivity swing selector (persisted with the scenario).
+document.getElementById("swingSel").addEventListener("change", (e) => {
+  sensSwing = parseFloat(e.target.value);
+  saveState();
+  renderSensitivity();
+});
+
+// Scenario export buttons — all client-side, nothing leaves the page.
+document.getElementById("copySummary").addEventListener("click", copySummary);
+document.getElementById("dlCsv").addEventListener("click", () =>
+  downloadFile("roi_scenario.csv", "text/csv", scenarioCsv()));
+document.getElementById("dlJson").addEventListener("click", () =>
+  downloadFile("roi_scenario.json", "application/json", scenarioJson()));
+document.getElementById("printBtn").addEventListener("click", () => {
+  buildPrintPage();
+  window.print();
+});
+window.addEventListener("beforeprint", buildPrintPage);   // covers Ctrl+P too
+
 // Tooltip wiring reads the live spec tip functions via closures.
 wireTooltip(document.getElementById("savingsChart"),
   () => savingsBoxes, (it) => `${it.name}<br><b>${eur(it.rawValue)}</b> net / yr`);
 wireTooltip(document.getElementById("paybackChart"),
   () => paybackBoxes, (it) => `${it.name}<br><b>${it.valueLabel}</b> payback`);
+wireTooltip(document.getElementById("sensChart"),
+  () => sensBoxes,
+  (it) => `${it.label}<br>${it.pessTxt} → <b>${eur(it.lo)}</b> · ${it.optTxt} → <b>${eur(it.hi)}</b>`);
 
 window.addEventListener("resize", () => renderCharts(computedResults()));
 loadSavedState();
+document.getElementById("swingSel").value = String(sensSwing);
 render();
 </script>
 </body>
