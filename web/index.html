@@ -136,7 +136,7 @@
                       font-variant-numeric: tabular-nums; }
 
   /* Charts */
-  .charts { display: grid; gap: 20px; }
+  .charts { display: grid; gap: 20px; position: relative; }  /* positioning frame for #tt */
   .chart-wrap { position: relative; }
   canvas { width: 100%; display: block; }
   .chart-title { font-size: 15px; text-transform: uppercase; letter-spacing: .05em;
@@ -206,7 +206,8 @@
     <!-- Editor -------------------------------------------------------- -->
     <aside class="card" aria-label="Process assumptions editor">
       <h2>Assumptions
-        <span class="hint">Pick a process, then tune its inputs. Charts recompute instantly.</span>
+        <span class="hint">Pick a process, then tune its inputs. Charts recompute instantly.
+          Edits persist in this browser until you reset.</span>
       </h2>
       <div class="tabs" id="tabs" role="tablist"></div>
       <div id="editor"></div>
@@ -250,7 +251,9 @@
   </div>
 
   <footer>
-    Synthetic data · MIT © 2026 Dimitres Kisimov · Model horizon 3 years, discount rate 8% ·
+    Synthetic data · © 2026 Dimitres Kisimov, all rights reserved (portfolio review — see LICENSE) ·
+    Model horizon 3 years, discount rate 8% · FTE ≈ 1,700 productive hours/yr ·
+    Your edits are saved in this browser only (localStorage); “Reset all” returns to the seed data ·
     The CLI equivalent is <code>python -m roi_model</code>.
   </footer>
 </div>
@@ -268,6 +271,7 @@ const HORIZON_YEARS = 3;
 const DISCOUNT_RATE = 0.08;
 const MONTHS_PER_YEAR = 12;
 const MINUTES_PER_HOUR = 60;
+const FTE_HOURS_PER_YEAR = 1700;   // productive hours per FTE (display only)
 
 // --- Seed data (mirror roi_model/data/processes.csv) -----------------
 const SEED = [
@@ -319,8 +323,15 @@ function compute(p) {
 }
 
 // --- Ranking (mirror model.rank) -------------------------------------
+// Returns results "best-first": name A→Z, payback smallest-first,
+// every other (numeric) field largest-first.
 function rankResults(results, key) {
   const arr = results.slice();
+  if (key === "name") {
+    // Codepoint comparison, matching Python's sorted() in model.rank exactly.
+    arr.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return arr;
+  }
   const smallerBetter = key === "payback_months";
   arr.sort((a, b) => {
     let av = a[key], bv = b[key];
@@ -332,7 +343,11 @@ function rankResults(results, key) {
 }
 
 /* ===================== formatting helpers ========================== */
-const eur = (x) => "€" + Math.round(x).toLocaleString("en-US");
+// Negative amounts read "-€60,000", not "€-60,000".
+const eur = (x) => {
+  const r = Math.round(x);
+  return (r < 0 ? "-€" : "€") + Math.abs(r).toLocaleString("en-US");
+};
 const num = (x, d = 0) => Number(x).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 const payFmt = (m) => m === null ? "never" : num(m, 1) + " mo";
 
@@ -349,7 +364,33 @@ function paybackTier(m) {
 let state = structuredClone(SEED);   // editable working copy
 let selectedIndex = 0;               // which process the editor targets
 let sortKey = "net_benefit_3y";      // backlog sort column
-let sortDir = -1;                    // -1 desc, 1 asc (net benefit desc default)
+let sortDir = -1;                    // -1 best-first, 1 reversed
+
+/* ---- scenario persistence (this browser only, offline) ------------- */
+// Adjusted assumptions survive a refresh via localStorage. "Reset all"
+// clears the saved scenario and returns to the seed data.
+const STORE_KEY = "automation-roi-explorer.scenario.v1";
+function saveState() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ state, selectedIndex }));
+  } catch (e) { /* storage unavailable (e.g. blocked) — run in-memory only */ }
+}
+function clearSavedState() {
+  try { localStorage.removeItem(STORE_KEY); } catch (e) { /* ignore */ }
+}
+function loadSavedState() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data.state) || data.state.length !== SEED.length) return;
+    const valid = data.state.every(p => typeof p.name === "string" &&
+      FIELDS.every(f => typeof p[f.key] === "number" && isFinite(p[f.key]) && p[f.key] >= 0));
+    if (!valid) return;
+    state = data.state;
+    selectedIndex = Math.min(Math.max(Number(data.selectedIndex) || 0, 0), state.length - 1);
+  } catch (e) { /* corrupt/unreadable saved scenario — fall back to seed */ }
+}
 
 // Editable fields shown as sliders in the editor.
 const FIELDS = [
@@ -510,11 +551,16 @@ function renderKPIs(results) {
   const monthlyNet = totalNet / 12;
   const blendedPayback = monthlyNet > 0 ? totalBuild / monthlyNet : null;
 
+  const totalFte = totalHours / FTE_HOURS_PER_YEAR;
   const tiles = [
-    { label: "Hours saved / yr",  value: num(totalHours),        unit: "person-hours freed" },
-    { label: "Net € saved / yr",  value: eur(totalNet),          unit: "after running costs" },
-    { label: "Blended payback",   value: payFmt(blendedPayback), unit: "across the portfolio" },
-    { label: "3-year ROI",        value: num(portfolioRoi) + "%",unit: "return on total spend" },
+    { label: "Portfolio hours / yr", value: num(totalHours),
+      unit: `all ${results.length} processes · ≈ ${num(totalFte, 1)} FTE` },
+    { label: "Portfolio net € / yr", value: eur(totalNet),
+      unit: "all processes, after running costs" },
+    { label: "Blended payback",      value: payFmt(blendedPayback),
+      unit: "across the portfolio" },
+    { label: "Portfolio 3-year ROI", value: num(portfolioRoi) + "%",
+      unit: "return on total spend" },
   ];
   document.getElementById("kpis").innerHTML = tiles.map(t => `
     <div class="kpi">
@@ -530,8 +576,13 @@ function renderTabs() {
     <button class="tab" role="tab" aria-selected="${i === selectedIndex}"
             data-idx="${i}" type="button">${p.name}</button>`).join("");
   tabs.querySelectorAll(".tab").forEach(b =>
-    b.addEventListener("click", () => { selectedIndex = +b.dataset.idx; render(); }));
+    b.addEventListener("click", () => { selectedIndex = +b.dataset.idx; saveState(); render(); }));
 }
+
+// Slider max is a UI convenience range, not a model limit (the Python model
+// has none). Typed values may exceed it — except hard-capped fields like
+// coverage, which is a fraction and cannot exceed 100%.
+function hardMax(f) { return f.key === "coverage" ? f.max : Infinity; }
 
 function renderEditor() {
   const p = state[selectedIndex];
@@ -541,31 +592,57 @@ function renderEditor() {
       <div class="row">
         <label for="r_${f.key}">${f.label}</label>
         <input class="num" id="n_${f.key}" type="number"
-               min="${f.min}" max="${f.max}" step="${f.step}" value="${p[f.key]}">
+               min="${f.min}"${f.key === "coverage" ? ` max="${f.max}"` : ""} step="${f.step}" value="${p[f.key]}">
       </div>
       <input id="r_${f.key}" type="range"
              min="${f.min}" max="${f.max}" step="${f.step}" value="${p[f.key]}">
-      <div class="sub" id="s_${f.key}">${f.fmt(p[f.key])}</div>
+      <div class="sub" id="s_${f.key}">${subText(f, p[f.key])}</div>
     </div>`).join("");
 
   FIELDS.forEach(f => {
     const range = document.getElementById("r_" + f.key);
     const numI  = document.getElementById("n_" + f.key);
     const sub   = document.getElementById("s_" + f.key);
-    const apply = (raw) => {
-      let v = parseFloat(raw);
-      if (isNaN(v)) return;
-      v = Math.min(Math.max(v, f.min), f.max);
+    // Push a value into the model and re-render everything except the box
+    // the user is typing in.
+    const applyValue = (v) => {
       state[selectedIndex][f.key] = v;
-      range.value = v; numI.value = v; sub.textContent = f.fmt(v);
+      range.value = Math.min(v, f.max);           // slider pegs at its max
+      sub.textContent = subText(f, v);
       renderKPIs(computedResults());
       renderReadout(compute(state[selectedIndex]));
       renderCharts(computedResults());
       renderTable(computedResults());
+      saveState();
     };
-    range.addEventListener("input", (e) => apply(e.target.value));
-    numI.addEventListener("input",  (e) => apply(e.target.value));
+    range.addEventListener("input", (e) => {
+      const v = parseFloat(e.target.value);
+      if (isNaN(v)) return;
+      numI.value = v;
+      applyValue(v);
+    });
+    // While typing: apply what parses, but NEVER rewrite the box mid-keystroke
+    // (rewriting made e.g. wage "35" impossible to type — it clamped at "3").
+    numI.addEventListener("input", (e) => {
+      let v = parseFloat(e.target.value);
+      if (isNaN(v)) return;
+      v = Math.min(Math.max(v, 0), hardMax(f));
+      applyValue(v);
+    });
+    // On commit (blur / Enter): enforce the field minimum and normalize the box.
+    numI.addEventListener("change", (e) => {
+      let v = parseFloat(e.target.value);
+      if (isNaN(v)) v = state[selectedIndex][f.key];
+      v = Math.min(Math.max(v, f.min), hardMax(f));
+      numI.value = v;
+      applyValue(v);
+    });
   });
+}
+
+// Sub-line under each slider; flags typed values beyond the slider's range.
+function subText(f, v) {
+  return f.fmt(v) + (v > f.max ? " · beyond slider range (value still used)" : "");
 }
 
 function renderReadout(r) {
@@ -575,7 +652,8 @@ function renderReadout(r) {
     { k: "Payback",        v: payFmt(r.payback_months) },
     { k: "3-year ROI",     v: num(r.roi_3y_pct) + "%" },
     { k: "3-year net €",   v: eur(r.net_benefit_3y) },
-    { k: "NPV (8%)",       v: eur(r.npv_3y) },
+    { k: "NPV 3y @ 8%",    v: eur(r.npv_3y) },
+    { k: "≈ FTE freed (1,700 h/yr)", v: num(r.annual_hours_saved / FTE_HOURS_PER_YEAR, 1) },
   ];
   document.getElementById("readout").innerHTML = cells.map(c => `
     <div class="cell"><div class="k">${c.k}</div><div class="v">${c.v}</div></div>`).join("");
@@ -622,16 +700,21 @@ function renderTable(results) {
   const ranked = rankResults(results, sortKey);
   if (sortDir === 1) ranked.reverse();
 
+  // The arrow reflects the ACTUAL direction of the displayed values
+  // (▲ ascending, ▼ descending), not the click count — best-first order
+  // is ascending for name and payback, descending for everything else.
+  const bestFirstAsc = (key) => key === "name" || key === "payback_months";
   document.getElementById("headRow").innerHTML = COLUMNS.map(col => {
     const active = col.key === sortKey;
-    const arrow = active ? `<span class="arrow">${sortDir === -1 ? "▼" : "▲"}</span>` : "";
+    const ascending = bestFirstAsc(col.key) === (sortDir === -1);
+    const arrow = active ? `<span class="arrow">${ascending ? "▲" : "▼"}</span>` : "";
     return `<th data-key="${col.key}">${col.label} ${arrow}</th>`;
   }).join("");
   document.querySelectorAll("#headRow th").forEach(th =>
     th.addEventListener("click", () => {
       const key = th.dataset.key;
       if (key === sortKey) { sortDir *= -1; }
-      else { sortKey = key; sortDir = key === "name" ? 1 : -1; }
+      else { sortKey = key; sortDir = -1; }   // first click: best-first
       renderTable(computedResults());
     }));
 
@@ -655,6 +738,7 @@ function renderTable(results) {
   document.querySelectorAll("#body tr").forEach(tr =>
     tr.addEventListener("click", () => {
       selectedIndex = state.findIndex(p => p.name === tr.dataset.name);
+      saveState();
       render();
     }));
 }
@@ -662,14 +746,17 @@ function renderTable(results) {
 /* ===================== tooltips ==================================== */
 function wireTooltip(canvas, getBoxes, specTipRef) {
   const tt = document.getElementById("tt");
+  const host = tt.parentElement;   // .card.charts — position:relative, so #tt
+                                   // coordinates must be in this card's frame.
   canvas.addEventListener("mousemove", (e) => {
     const rect = canvas.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
     const box = getBoxes().find(b => y >= b.y && y <= b.y + b.h);
     if (!box) { tt.style.opacity = 0; return; }
     tt.innerHTML = specTipRef(box.item);
-    tt.style.left = (canvas.offsetLeft + x) + "px";
-    tt.style.top  = (canvas.offsetTop + box.y + 6) + "px";
+    tt.style.left = (rect.left - hostRect.left + x) + "px";
+    tt.style.top  = (rect.top  - hostRect.top  + box.y + 6) + "px";
     tt.style.opacity = 1;
   });
   canvas.addEventListener("mouseleave", () => { tt.style.opacity = 0; });
@@ -678,10 +765,13 @@ function wireTooltip(canvas, getBoxes, specTipRef) {
 /* ===================== events & boot =============================== */
 document.getElementById("resetOne").addEventListener("click", () => {
   state[selectedIndex] = structuredClone(SEED[selectedIndex]);
+  saveState();
   render();
 });
 document.getElementById("resetAll").addEventListener("click", () => {
-  state = structuredClone(SEED); selectedIndex = 0; render();
+  state = structuredClone(SEED); selectedIndex = 0;
+  clearSavedState();
+  render();
 });
 
 // Theme toggle: stamp data-theme so it wins over OS preference.
@@ -700,6 +790,7 @@ wireTooltip(document.getElementById("paybackChart"),
   () => paybackBoxes, (it) => `${it.name}<br><b>${it.valueLabel}</b> payback`);
 
 window.addEventListener("resize", () => renderCharts(computedResults()));
+loadSavedState();
 render();
 </script>
 </body>
