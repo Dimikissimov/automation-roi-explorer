@@ -8,10 +8,18 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 
 import pytest
 
-from roi_model import compute, load_processes, rank, sensitivity, stress_band
+from roi_model import (
+    break_even,
+    compute,
+    load_processes,
+    rank,
+    sensitivity,
+    stress_band,
+)
 from roi_model.cli import export_csv, export_json, main, render_table
 from roi_model.model import ProcessInput
 
@@ -300,4 +308,86 @@ def test_cli_rejects_out_of_range_swing(capsys):
     captured = capsys.readouterr()
     assert code == 2
     assert "--swing" in captured.err
+    assert "Traceback" not in captured.err
+
+
+# --- break-even ("how far can each assumption move") --------------------------
+
+def test_break_even_covers_every_driver_tightest_first():
+    rows = break_even(RFQ)
+    assert len(rows) == 7
+    pcts = [r.margin_pct for r in rows if r.margin_pct is not None]
+    assert pcts == sorted(pcts)  # tightest margin first
+    # Manual minutes has the least headroom for RFQ (a 5-min gap, so a small
+    # absolute change is a large relative one), so it is the most fragile.
+    assert rows[0].field == "minutes_manual"
+
+
+def test_break_even_build_cost_is_net_saving_over_horizon():
+    # net_benefit_3y = net_saving*3 - build_cost, so it hits zero when the build
+    # cost equals three years of net saving, independent of the current build.
+    base = compute(RFQ)
+    row = next(r for r in break_even(RFQ) if r.field == "build_cost")
+    assert row.direction == "high"
+    assert row.breakeven_value == pytest.approx(base.annual_net_saving * 3, abs=1)
+
+
+def test_break_even_coverage_matches_hand_math():
+    # net_benefit_3y = 384000*coverage - 39400  ->  zero at 39400/384000 = 0.1026
+    row = next(r for r in break_even(RFQ) if r.field == "coverage")
+    assert row.direction == "low"
+    assert row.breakeven_value == pytest.approx(39400 / 384000, abs=1e-3)
+    # headroom = (0.70 - 0.1026)/0.70 * 100
+    assert row.margin_pct == pytest.approx((0.70 - 39400 / 384000) / 0.70 * 100, abs=0.1)
+
+
+def test_break_even_value_zeroes_the_net_benefit():
+    # The solver's contract, checked against compute() itself for every driver:
+    # putting a driver at its break-even value drives 3y net benefit to ~0.
+    for row in break_even(RFQ):
+        if row.breakeven_value is None:
+            continue
+        r = compute(replace(RFQ, **{row.field: row.breakeven_value}))
+        assert r.net_benefit_3y == pytest.approx(0.0, abs=1.0)
+
+
+def test_break_even_margin_abs_matches_base_minus_breakeven():
+    row = next(r for r in break_even(RFQ) if r.field == "monthly_cost")
+    assert row.margin_abs == pytest.approx(abs(row.base_value - row.breakeven_value), abs=1e-6)
+
+
+def test_break_even_is_deterministic():
+    # No RNG, no wall-clock: identical inputs give identical break-even values.
+    first = [(r.field, r.breakeven_value) for r in break_even(RFQ)]
+    second = [(r.field, r.breakeven_value) for r in break_even(RFQ)]
+    assert first == second
+
+
+def test_break_even_unreachable_when_no_costs_to_overcome():
+    # With no build or running cost, cutting volume/coverage only pushes the
+    # net benefit down toward zero, never below it: no reachable break-even.
+    proc = ProcessInput("Free to run", 10000, 10, 1, 30, 0.8, 0, 0)
+    rows = {r.field: r for r in break_even(proc)}
+    assert rows["coverage"].breakeven_value is None
+    assert rows["coverage"].margin_pct is None
+
+
+def test_cli_breakeven_report(capsys):
+    code = main(["--breakeven", "RFQ email triage"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Break-even - RFQ email triage" in out
+    assert "Manual min/task" in out
+    assert "Headroom" in out
+    assert "most fragile to" in out
+    # Break-even mode replaces the backlog table.
+    assert "Automation backlog" not in out
+
+
+def test_cli_breakeven_unknown_process_fails_cleanly(capsys):
+    code = main(["--breakeven", "No such process"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "unknown process 'No such process'" in captured.err
+    assert "RFQ email triage" in captured.err  # lists the valid names
     assert "Traceback" not in captured.err

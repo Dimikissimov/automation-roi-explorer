@@ -24,6 +24,16 @@ The dashboard is a single offline HTML file. Open it, adjust a process's sliders
 
 The one decision I'm glad I made: the bar chart and the payback chart are drawn by hand on a `<canvas>` element. I could have pulled in Chart.js or D3, but that's a dependency, a CDN request, and a chunk of the "offline" promise gone. Drawing the bars, axes, tooltips, and the light/dark theming myself was more code, but the whole thing stays a single file you can double-click. The JavaScript `compute()` mirrors the Python `compute()` line for line, which is what keeps the dashboard and the CLI from ever disagreeing.
 
+## Break-even — how far each assumption can move
+
+The tornado ranks which driver moves the outcome most within a ±band. The natural next question is the opposite one: *how far can each assumption be wrong before the decision flips?* For every driver, `roi_model.breakeven.break_even()` solves — by bisection on the same `compute()`, so no ROI math is duplicated — for the value at which the 3-year net benefit hits zero while the other drivers stay at base, then ranks the drivers by the tightest margin of safety.
+
+For the model's top-ranked process the read is reassuring and specific: the case is most fragile to **manual minutes per task** — it still pays until that estimate is off by about **77%** — while build and running costs have enormous headroom. It's a CLI and model feature (`python -m roi_model --breakeven "Invoice matching (3-way)"`); the chart below is generated straight from the model by [`scripts/make_breakeven.py`](scripts/make_breakeven.py) (hand-drawn SVG, no plotting library), alongside a [CSV of the exact break-even values](deliverables/breakeven_margins.csv).
+
+![Margin-of-safety chart — for the model's top-ranked process, how far each assumption can move before the 3-year case stops paying back, ranked tightest margin first](deliverables/breakeven_margins.svg)
+
+These are tolerances on the (synthetic, illustrative) assumptions, not probabilities — they say how much room an estimate has, not how likely a shortfall is.
+
 ## Running it
 
 The dashboard needs nothing installed — just open `web/index.html` (`start web/index.html` on Windows, `open web/index.html` on macOS).
@@ -37,6 +47,7 @@ python -m roi_model --csv my_processes.csv
 python -m roi_model --export-json out.json --export-csv out.csv
 python -m roi_model --sensitivity "RFQ email triage"            # tornado, +/-20%
 python -m roi_model --sensitivity "RFQ email triage" --swing 30
+python -m roi_model --breakeven "RFQ email triage"             # margin of safety
 ```
 
 ```
@@ -72,6 +83,7 @@ The model is intentionally simple, and every assumption is out in the open and a
 - Costs exclude change management, risk, and the maintenance tail. NPV uses a flat 8% discount rate (`DISCOUNT_RATE`).
 - Processes are scored independently — no shared platform costs, no one automation unlocking another.
 - The sensitivity view stress-tests the assumptions you set, one driver at a time at a swing you pick. It shows how fragile the number is, not how likely any outcome is — there's no probability model behind it.
+- The break-even view finds how far each single assumption can move before the case stops paying, holding the others fixed. Real shortfalls arrive in combinations (that's what the stress band is for), and the margins say nothing about likelihood — only about headroom.
 
 Use it to structure and compare the decision, then apply judgement.
 

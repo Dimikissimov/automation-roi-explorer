@@ -3,6 +3,7 @@
 Public API:
     ProcessInput, ProcessResult, compute, rank    (from roi_model.model)
     SensitivityRow, sensitivity, stress_band      (from roi_model.model)
+    BreakEvenRow, break_even                       (from roi_model.breakeven)
     load_processes                                (from roi_model.data_load)
 
 Example:
@@ -12,6 +13,7 @@ Example:
         print(r.name, r.net_benefit_3y)
 """
 
+from roi_model.breakeven import BreakEvenRow, break_even
 from roi_model.data_load import load_processes
 from roi_model.model import (
     ProcessInput,
@@ -27,10 +29,12 @@ __all__ = [
     "ProcessInput",
     "ProcessResult",
     "SensitivityRow",
+    "BreakEvenRow",
     "compute",
     "rank",
     "sensitivity",
     "stress_band",
+    "break_even",
     "load_processes",
 ]
 

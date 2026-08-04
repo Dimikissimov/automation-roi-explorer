@@ -11,6 +11,7 @@ Usage:
     python -m roi_model --export-csv out.csv
     python -m roi_model --sensitivity "RFQ email triage"            # tornado, +/-20%
     python -m roi_model --sensitivity "RFQ email triage" --swing 30
+    python -m roi_model --breakeven "RFQ email triage"             # margin of safety
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import sys
 from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
+from roi_model.breakeven import break_even
 from roi_model.data_load import load_processes
 from roi_model.model import (
     FTE_HOURS_PER_YEAR,
@@ -156,6 +158,66 @@ def render_sensitivity_report(proc: ProcessInput, swing: float) -> str:
     return "\n".join(lines)
 
 
+def render_breakeven_report(proc: ProcessInput) -> str:
+    """Render the per-driver break-even / margin-of-safety table (ASCII only).
+
+    Shows, for each driver, how far it can move from the base assumption before
+    the 3-year net benefit hits zero, ranked tightest headroom first, and ends
+    with the one-line read of which assumption the case is most fragile to.
+    """
+    base = compute(proc)
+    rows = break_even(proc)
+
+    lines: list[str] = []
+    lines.append(f"Break-even - {proc.name} "
+                 "(how far each assumption can move before the 3y case stops paying)")
+    lines.append(f"Base: 3y net benefit {base.net_benefit_3y:,.0f} EUR, "
+                 f"payback {_fmt_payback(base.payback_months)}\n")
+
+    header = (f"{'Driver':<20}  {'Base':>12}  {'Break-even':>12}  "
+              f"{'Can move':>10}  {'Headroom':>16}")
+    lines.append(header)
+    lines.append("-" * len(header))
+    for row in rows:
+        base_txt = _fmt_input(row.field, row.base_value)
+        if row.breakeven_value is None:
+            lines.append(
+                f"{_DRIVER_LABELS[row.field]:<20}  {base_txt:>12}  "
+                f"{'none':>12}  {'--':>10}  {'no break-even':>16}"
+            )
+            continue
+        be_txt = _fmt_input(row.field, row.breakeven_value)
+        move = "down to" if row.direction == "low" else "up to"
+        verb = "drop" if row.direction == "low" else "rise"
+        headroom = f"{row.margin_pct:,.0f}% {verb}"
+        lines.append(
+            f"{_DRIVER_LABELS[row.field]:<20}  {base_txt:>12}  "
+            f"{be_txt:>12}  {move:>10}  {headroom:>16}"
+        )
+
+    reachable = [r for r in rows if r.breakeven_value is not None]
+    lines.append("")
+    if base.net_benefit_3y <= 0:
+        lines.append("Read: the base case does not pay back, so there is no "
+                     "deterioration margin to report.")
+    elif reachable:
+        tightest = reachable[0]
+        move = "falls to" if tightest.direction == "low" else "rises to"
+        verb = "drop" if tightest.direction == "low" else "rise"
+        be_val = _fmt_input(tightest.field, tightest.breakeven_value)
+        base_val = _fmt_input(tightest.field, tightest.base_value)
+        lines.append(
+            f"Read: most fragile to {_DRIVER_LABELS[tightest.field]} - the 3y case "
+            f"breaks even when it {move} {be_val} "
+            f"(a {tightest.margin_pct:,.0f}% {verb} from {base_val}). "
+            "Beyond that the automation stops paying back over 3 years."
+        )
+    lines.append("Margins are tolerances on your own assumptions, not "
+                 "probabilities - they show how much room the estimate has, "
+                 "not how likely a shortfall is.")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser (kept separate so tests can reuse it)."""
     parser = argparse.ArgumentParser(
@@ -175,7 +237,23 @@ def build_parser() -> argparse.ArgumentParser:
                              "named process instead of the backlog table.")
     parser.add_argument("--swing", type=float, default=20.0,
                         help="Sensitivity swing per driver, in percent (default: 20).")
+    parser.add_argument("--breakeven", metavar="PROCESS", default=None,
+                        help="Print a break-even / margin-of-safety report for the "
+                             "named process: how far each assumption can move before "
+                             "the 3-year case stops paying.")
     return parser
+
+
+def _find_process(processes: list[ProcessInput], name: str) -> ProcessInput | None:
+    """Return the process with this exact name, or None if there isn't one."""
+    return next((p for p in processes if p.name == name), None)
+
+
+def _unknown_process_error(processes: list[ProcessInput], name: str) -> int:
+    """Print a clean 'unknown process' message listing valid names; return 2."""
+    names = ", ".join(f"'{p.name}'" for p in processes)
+    print(f"error: unknown process '{name}'. Valid names: {names}", file=sys.stderr)
+    return 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -202,13 +280,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.sensitivity is not None:
-        match = next((p for p in processes if p.name == args.sensitivity), None)
+        match = _find_process(processes, args.sensitivity)
         if match is None:
-            names = ", ".join(f"'{p.name}'" for p in processes)
-            print(f"error: unknown process '{args.sensitivity}'. "
-                  f"Valid names: {names}", file=sys.stderr)
-            return 2
+            return _unknown_process_error(processes, args.sensitivity)
         print(render_sensitivity_report(match, args.swing / 100))
+        return 0
+
+    if args.breakeven is not None:
+        match = _find_process(processes, args.breakeven)
+        if match is None:
+            return _unknown_process_error(processes, args.breakeven)
+        print(render_breakeven_report(match))
         return 0
 
     results = rank([compute(p) for p in processes], key=args.sort)

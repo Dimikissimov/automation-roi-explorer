@@ -1,0 +1,8 @@
+process,driver,worsens_when,base_value,breakeven_value,margin_abs,margin_pct,base_net_benefit_3y
+Invoice matching (3-way),Manual min/task,falls,4,0.902614,3.09739,77.43,473900.00
+Invoice matching (3-way),Annual volume,falls,120000,13803.9,106196,88.50,473900.00
+Invoice matching (3-way),Hourly wage,falls,30,3.45098,26.549,88.50,473900.00
+Invoice matching (3-way),Coverage,falls,0.85,0.097778,0.752222,88.50,473900.00
+Invoice matching (3-way),Automated min/task,rises,0.5,3.59739,3.09739,619.48,473900.00
+Invoice matching (3-way),Build cost,rises,40000,513900,473900,1184.75,473900.00
+Invoice matching (3-way),Monthly cost,rises,600,13763.9,13163.9,2193.98,473900.00
