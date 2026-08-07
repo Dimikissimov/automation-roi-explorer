@@ -34,6 +34,16 @@ For the model's top-ranked process the read is reassuring and specific: the case
 
 These are tolerances on the (synthetic, illustrative) assumptions, not probabilities — they say how much room an estimate has, not how likely a shortfall is.
 
+## Phased rollout — when it really turns cash-positive
+
+The payback in the ranked table is *idealised*: it assumes the automation delivers full benefit from month one. Real rollouts ramp — adoption climbs over a few months while the running cost is paid in full from go-live, so the case turns cash-positive later than the headline number suggests. `roi_model.rollout.phased_cashflow()` lays the same `compute()` economics onto a monthly timeline with a linear adoption ramp and reports the **ramp-adjusted payback month**, the **cumulative cashflow curve**, and the **ramp cost** — the 3-year net benefit a slow start forgoes. No ROI math is re-derived; the steady-state monthly saving comes straight from `compute()`, so this view can never drift from the CLI table.
+
+For the model's top-ranked process the effect is concrete: a 6-month linear ramp pushes payback from an idealised **2.8 months to month 6** and costs **~€37,200** of 3-year net benefit (€436,700 ramped vs €473,900 idealised) — the running cost is paid either way, so the whole gap is saving the slow start leaves on the table. Like the break-even view, it's a CLI and model feature (`python -m roi_model --rollout "Invoice matching (3-way)" --ramp-months 6`); the chart below is generated straight from the model by [`scripts/make_rollout.py`](scripts/make_rollout.py) (hand-drawn SVG, no plotting library), alongside a [CSV of the month-by-month cashflow](deliverables/rollout_cashflow.csv).
+
+![Phased-rollout cumulative cashflow chart — for the model's top-ranked process, the ramped cashflow curve against the idealised full-benefit line, with the ramp-adjusted payback month marked](deliverables/rollout_cashflow.svg)
+
+The linear ramp is an *illustrative assumption*, not a measured adoption curve — it shows how sensitive payback is to a slow start, not how a real rollout will actually ramp.
+
 ## Running it
 
 The dashboard needs nothing installed — just open `web/index.html` (`start web/index.html` on Windows, `open web/index.html` on macOS).
@@ -48,6 +58,7 @@ python -m roi_model --export-json out.json --export-csv out.csv
 python -m roi_model --sensitivity "RFQ email triage"            # tornado, +/-20%
 python -m roi_model --sensitivity "RFQ email triage" --swing 30
 python -m roi_model --breakeven "RFQ email triage"             # margin of safety
+python -m roi_model --rollout "RFQ email triage" --ramp-months 6  # phased cashflow
 ```
 
 ```
@@ -78,7 +89,7 @@ The model is intentionally simple, and every assumption is out in the open and a
 
 - The five seeded processes and their figures are synthetic. Swap in your own before deciding anything.
 - Savings assume freed hours turn into real money (redeployed staff, avoided hires, less overtime). If the freed time just evaporates, treat the "saving" as capacity, not cash.
-- Volumes, wages, and per-task times are held flat across three years. No ramp-up or seasonality.
+- The base model holds volumes, wages, and per-task times flat across three years and books full benefit from month one — no seasonality. The phased-rollout view adds an optional linear adoption ramp to see how much later payback really arrives, but the ramp shape is itself an assumption, not a measured curve.
 - `coverage` is a single number for the share of volume the automation truly handles end to end. Real automations have a messy tail; be honest here.
 - Costs exclude change management, risk, and the maintenance tail. NPV uses a flat 8% discount rate (`DISCOUNT_RATE`).
 - Processes are scored independently — no shared platform costs, no one automation unlocking another.

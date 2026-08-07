@@ -12,6 +12,7 @@ Usage:
     python -m roi_model --sensitivity "RFQ email triage"            # tornado, +/-20%
     python -m roi_model --sensitivity "RFQ email triage" --swing 30
     python -m roi_model --breakeven "RFQ email triage"             # margin of safety
+    python -m roi_model --rollout "RFQ email triage" --ramp-months 6  # phased cashflow
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ from roi_model.breakeven import break_even
 from roi_model.data_load import load_processes
 from roi_model.model import (
     FTE_HOURS_PER_YEAR,
+    HORIZON_YEARS,
+    MONTHS_PER_YEAR,
     ProcessInput,
     ProcessResult,
     compute,
@@ -34,6 +37,7 @@ from roi_model.model import (
     sensitivity,
     stress_band,
 )
+from roi_model.rollout import phased_cashflow
 
 # Fields the --sort flag accepts (every column on ProcessResult).
 VALID_SORT_FIELDS = tuple(f.name for f in dataclass_fields(ProcessResult))
@@ -218,6 +222,70 @@ def render_breakeven_report(proc: ProcessInput) -> str:
     return "\n".join(lines)
 
 
+def _fmt_month(month: int | None) -> str:
+    """A payback month as an integer month, or 'never'."""
+    return "never" if month is None else f"month {month}"
+
+
+def render_rollout_report(proc: ProcessInput, ramp_months: int) -> str:
+    """Render the phased-rollout cumulative cashflow report (ASCII only).
+
+    Lays the steady-state economics onto a monthly timeline with a linear
+    adoption ramp, then shows the ramp-adjusted payback month, the 3-year net
+    benefit the ramp costs, and the cumulative cashflow at key milestones.
+    """
+    roll = phased_cashflow(proc, ramp_months)
+    by_month = {m.month: m for m in roll.schedule}
+
+    lines: list[str] = []
+    lines.append(f"Phased rollout - {proc.name} "
+                 f"(linear adoption ramp to full over {ramp_months} month"
+                 f"{'' if ramp_months == 1 else 's'})")
+    lines.append(
+        f"Idealised (full benefit from month 1): payback "
+        f"{_fmt_payback(roll.instant_payback_months)}, "
+        f"3y net benefit {roll.net_benefit_3y_instant:,.0f} EUR\n"
+    )
+
+    slip = ("" if roll.payback_slip_months is None
+            else f" (+{roll.payback_slip_months:,.1f} mo vs idealised)")
+    lines.append(f"Ramp-adjusted payback:  {_fmt_month(roll.ramp_payback_month)}{slip}")
+    lines.append(f"Ramp cost over 3y:      {roll.ramp_cost_3y:,.0f} EUR "
+                 f"(3y net benefit {roll.net_benefit_3y_ramped:,.0f} ramped "
+                 f"vs {roll.net_benefit_3y_instant:,.0f} idealised)")
+    lines.append(f"NPV over 3y:            {roll.npv_3y_ramped:,.0f} EUR ramped "
+                 f"vs {roll.npv_3y_instant:,.0f} idealised\n")
+
+    # Cumulative cashflow at the milestones that tell the story: month 1, the end
+    # of the ramp, the payback crossing, and each year end.
+    milestones = {1, ramp_months, roll.horizon_months}
+    for year_end in range(MONTHS_PER_YEAR, roll.horizon_months + 1, MONTHS_PER_YEAR):
+        milestones.add(year_end)
+    if roll.ramp_payback_month is not None:
+        milestones.add(roll.ramp_payback_month)
+    shown = sorted(m for m in milestones if 1 <= m <= roll.horizon_months)
+
+    header = (f"{'Month':>6}  {'Benefit live':>12}  {'Net this mo':>12}  "
+              f"{'Cumulative EUR':>16}")
+    lines.append(header)
+    lines.append("-" * len(header))
+    for month in shown:
+        cf = by_month[month]
+        marker = "  <- pays back" if month == roll.ramp_payback_month else ""
+        lines.append(
+            f"{cf.month:>6}  {cf.realized_fraction * 100:>11,.0f}%  "
+            f"{cf.monthly_net:>12,.0f}  {cf.cumulative_net:>16,.0f}{marker}"
+        )
+
+    lines.append("\nThe adoption ramp is an illustrative assumption (linear to full "
+                 "over the chosen months),")
+    lines.append("not a measured rollout curve. It delays the realised saving, not "
+                 "the running cost, so")
+    lines.append("payback arrives later than the idealised figure - by how much is "
+                 "what this shows.")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser (kept separate so tests can reuse it)."""
     parser = argparse.ArgumentParser(
@@ -241,6 +309,13 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Print a break-even / margin-of-safety report for the "
                              "named process: how far each assumption can move before "
                              "the 3-year case stops paying.")
+    parser.add_argument("--rollout", metavar="PROCESS", default=None,
+                        help="Print a phased-rollout cumulative cashflow report for "
+                             "the named process: the ramp-adjusted payback month and "
+                             "the 3-year benefit a slow adoption ramp costs.")
+    parser.add_argument("--ramp-months", type=int, default=6,
+                        help="Length of the linear adoption ramp for --rollout, in "
+                             "months (default: 6). 1 means full benefit from month 1.")
     return parser
 
 
@@ -270,6 +345,12 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
 
+    horizon_months = HORIZON_YEARS * MONTHS_PER_YEAR
+    if not 1 <= args.ramp_months <= horizon_months:
+        print(f"error: --ramp-months must be between 1 and {horizon_months} "
+              f"(got {args.ramp_months}).", file=sys.stderr)
+        return 2
+
     try:
         processes = load_processes(args.csv)
     except FileNotFoundError:
@@ -291,6 +372,13 @@ def main(argv: list[str] | None = None) -> int:
         if match is None:
             return _unknown_process_error(processes, args.breakeven)
         print(render_breakeven_report(match))
+        return 0
+
+    if args.rollout is not None:
+        match = _find_process(processes, args.rollout)
+        if match is None:
+            return _unknown_process_error(processes, args.rollout)
+        print(render_rollout_report(match, args.ramp_months))
         return 0
 
     results = rank([compute(p) for p in processes], key=args.sort)

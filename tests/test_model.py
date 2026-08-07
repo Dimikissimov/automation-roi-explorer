@@ -16,6 +16,7 @@ from roi_model import (
     break_even,
     compute,
     load_processes,
+    phased_cashflow,
     rank,
     sensitivity,
     stress_band,
@@ -390,4 +391,144 @@ def test_cli_breakeven_unknown_process_fails_cleanly(capsys):
     assert code == 2
     assert "unknown process 'No such process'" in captured.err
     assert "RFQ email triage" in captured.err  # lists the valid names
+    assert "Traceback" not in captured.err
+
+
+# --- phased rollout ("when does it really turn cash-positive") ----------------
+
+def test_phased_cashflow_no_ramp_equals_instant_base_case():
+    # ramp_months=1 = full benefit from month 1, so the ramped 3y net benefit and
+    # NPV must exactly match the idealised base case, and the ramp costs nothing.
+    base = compute(RFQ)
+    roll = phased_cashflow(RFQ, ramp_months=1)
+    assert roll.net_benefit_3y_ramped == pytest.approx(base.net_benefit_3y, abs=0.01)
+    assert roll.npv_3y_ramped == pytest.approx(base.npv_3y, abs=0.01)
+    assert roll.ramp_cost_3y == pytest.approx(0.0, abs=0.01)
+
+
+def test_phased_cashflow_schedule_spans_the_full_horizon():
+    roll = phased_cashflow(RFQ, ramp_months=6)
+    assert len(roll.schedule) == 36           # 3 years, monthly
+    assert roll.horizon_months == 36
+    assert [m.month for m in roll.schedule] == list(range(1, 37))
+
+
+def test_phased_cashflow_ramp_reaches_full_benefit_then_holds():
+    ramp = 6
+    roll = phased_cashflow(RFQ, ramp_months=ramp)
+    for cf in roll.schedule:
+        if cf.month < ramp:
+            assert cf.realized_fraction < 1.0          # still ramping
+        else:
+            assert cf.realized_fraction == 1.0          # full from ramp end on
+    # Linear: month k carries k/ramp of the benefit while ramping.
+    assert roll.schedule[0].realized_fraction == pytest.approx(1 / ramp, abs=1e-6)
+
+
+def test_phased_cashflow_cumulative_matches_hand_math():
+    # RFQ, 6-month ramp: monthly gross 89,600/12 = 7,466.67, running 400/mo,
+    # build 25,000. Month 1 realises 1/6 of the gross:
+    #   844.44 net -> cumulative -24,155.56 ; full month is 7,066.67 net.
+    roll = phased_cashflow(RFQ, ramp_months=6)
+    m1 = roll.schedule[0]
+    assert m1.realized_fraction == pytest.approx(1 / 6, abs=1e-6)
+    assert m1.monthly_net == pytest.approx(844.44, abs=0.01)
+    assert m1.cumulative_net == pytest.approx(-24155.56, abs=0.01)
+    # The final cumulative is, by construction, the ramped 3-year net benefit.
+    assert roll.schedule[-1].cumulative_net == pytest.approx(
+        roll.net_benefit_3y_ramped, abs=0.01)
+
+
+def test_phased_cashflow_ramp_delays_payback_and_costs_benefit():
+    # A 6-month ramp pushes RFQ payback from ~3.5 (idealised) to month 7 and
+    # trims 3-year net benefit by 18,666.67 (the gross forgone during the ramp;
+    # running cost is paid in full either way).
+    base = compute(RFQ)
+    roll = phased_cashflow(RFQ, ramp_months=6)
+    assert roll.ramp_payback_month == 7
+    assert roll.instant_payback_months == base.payback_months
+    assert roll.payback_slip_months == pytest.approx(7 - base.payback_months, abs=0.01)
+    assert roll.ramp_cost_3y == pytest.approx(18666.67, abs=0.01)
+    assert roll.net_benefit_3y_ramped == pytest.approx(210733.33, abs=0.01)
+
+
+def test_phased_cashflow_ramp_payback_is_first_zero_crossing():
+    roll = phased_cashflow(RFQ, ramp_months=6)
+    pm = roll.ramp_payback_month
+    assert pm is not None
+    assert roll.schedule[pm - 1].cumulative_net >= 0        # crosses at pm
+    assert roll.schedule[pm - 2].cumulative_net < 0         # still negative before
+
+
+def test_phased_cashflow_never_beats_the_instant_case():
+    # A ramp can only delay benefit, never bring it forward: the ramped figures
+    # are always <= the idealised ones, across ramp lengths and seed processes.
+    for proc in load_processes():
+        for ramp in (1, 3, 6, 12):
+            roll = phased_cashflow(proc, ramp_months=ramp)
+            assert roll.net_benefit_3y_ramped <= roll.net_benefit_3y_instant + 1e-6
+            assert roll.npv_3y_ramped <= roll.npv_3y_instant + 1e-6
+            assert roll.ramp_cost_3y >= -1e-6
+            if roll.ramp_payback_month is not None and roll.instant_payback_months:
+                assert roll.ramp_payback_month >= roll.instant_payback_months - 1e-6
+
+
+def test_phased_cashflow_no_payback_when_case_never_pays():
+    # Running cost swamps the saving: the case never pays back with or without a
+    # ramp, so both paybacks (and the slip) are undefined.
+    loss = ProcessInput("Loss-making", 1000, 10, 1, 30, 1.0, 5000, 5000)
+    roll = phased_cashflow(loss, ramp_months=6)
+    assert roll.instant_payback_months is None
+    assert roll.ramp_payback_month is None
+    assert roll.payback_slip_months is None
+
+
+def test_phased_cashflow_rejects_ramp_below_one():
+    with pytest.raises(ValueError, match="ramp_months"):
+        phased_cashflow(RFQ, ramp_months=0)
+
+
+def test_phased_cashflow_is_deterministic():
+    # No RNG, no wall-clock: identical inputs give identical schedules and totals.
+    first = phased_cashflow(RFQ, ramp_months=6)
+    second = phased_cashflow(RFQ, ramp_months=6)
+    assert first.schedule == second.schedule
+    assert first.net_benefit_3y_ramped == second.net_benefit_3y_ramped
+    assert first.npv_3y_ramped == second.npv_3y_ramped
+
+
+def test_cli_rollout_report(capsys):
+    code = main(["--rollout", "Invoice matching (3-way)"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Phased rollout - Invoice matching (3-way)" in out
+    assert "Ramp-adjusted payback" in out
+    assert "Ramp cost over 3y" in out
+    assert "pays back" in out
+    assert "Cumulative" in out
+    # Rollout mode replaces the backlog table.
+    assert "Automation backlog" not in out
+
+
+def test_cli_rollout_honors_ramp_months(capsys):
+    code = main(["--rollout", "RFQ email triage", "--ramp-months", "12"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "over 12 months" in out
+
+
+def test_cli_rollout_unknown_process_fails_cleanly(capsys):
+    code = main(["--rollout", "No such process"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "unknown process 'No such process'" in captured.err
+    assert "RFQ email triage" in captured.err  # lists the valid names
+    assert "Traceback" not in captured.err
+
+
+def test_cli_rejects_out_of_range_ramp_months(capsys):
+    code = main(["--rollout", "RFQ email triage", "--ramp-months", "0"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "--ramp-months" in captured.err
     assert "Traceback" not in captured.err

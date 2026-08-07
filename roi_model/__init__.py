@@ -4,6 +4,7 @@ Public API:
     ProcessInput, ProcessResult, compute, rank    (from roi_model.model)
     SensitivityRow, sensitivity, stress_band      (from roi_model.model)
     BreakEvenRow, break_even                       (from roi_model.breakeven)
+    CashflowMonth, RolloutResult, phased_cashflow  (from roi_model.rollout)
     load_processes                                (from roi_model.data_load)
 
 Example:
@@ -24,17 +25,21 @@ from roi_model.model import (
     sensitivity,
     stress_band,
 )
+from roi_model.rollout import CashflowMonth, RolloutResult, phased_cashflow
 
 __all__ = [
     "ProcessInput",
     "ProcessResult",
     "SensitivityRow",
     "BreakEvenRow",
+    "CashflowMonth",
+    "RolloutResult",
     "compute",
     "rank",
     "sensitivity",
     "stress_band",
     "break_even",
+    "phased_cashflow",
     "load_processes",
 ]
 

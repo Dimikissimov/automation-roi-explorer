@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="560" viewBox="0 0 940 560" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<rect width="940" height="560" fill="#ffffff"/>
+<text x="28" y="44" font-size="21" font-weight="700" fill="#1a2332">Phased-rollout cumulative cashflow &#8212; Invoice matching (3-way)</text>
+<text x="28" y="70" font-size="12.5" fill="#5b6672">Cumulative euros over 36 months with a linear 6-month adoption ramp, against the idealised full-benefit line.</text>
+<text x="28" y="88" font-size="12.5" fill="#5b6672">The automation pays the running cost in full from month 1 but earns the saving only as adoption climbs &#8212; so it turns cash-positive later.</text>
+<rect x="96.0" y="150" width="122.0" height="300" fill="#eef4fd"/>
+<text x="157.0" y="142" font-size="10.5" fill="#5b6672" text-anchor="middle">ramp-up (6 mo)</text>
+<line x1="96" y1="450.0" x2="828" y2="450.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="453.5" font-size="10.5" fill="#5b6672" text-anchor="end">-100k</text>
+<line x1="96" y1="400.0" x2="828" y2="400.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="403.5" font-size="10.5" fill="#5b6672" text-anchor="end">0k</text>
+<line x1="96" y1="350.0" x2="828" y2="350.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="353.5" font-size="10.5" fill="#5b6672" text-anchor="end">100k</text>
+<line x1="96" y1="300.0" x2="828" y2="300.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="303.5" font-size="10.5" fill="#5b6672" text-anchor="end">200k</text>
+<line x1="96" y1="250.0" x2="828" y2="250.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="253.5" font-size="10.5" fill="#5b6672" text-anchor="end">300k</text>
+<line x1="96" y1="200.0" x2="828" y2="200.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="203.5" font-size="10.5" fill="#5b6672" text-anchor="end">400k</text>
+<line x1="96" y1="150.0" x2="828" y2="150.0" stroke="#d0d7de" stroke-width="1"/>
+<text x="88" y="153.5" font-size="10.5" fill="#5b6672" text-anchor="end">500k</text>
+<line x1="96" y1="400.0" x2="828" y2="400.0" stroke="#1a2332" stroke-width="1.3" stroke-dasharray="2 3"/>
+<text x="832" y="403.5" font-size="10" fill="#1a2332">break-even</text>
+<line x1="96.0" y1="450" x2="96.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="96.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">0</text>
+<line x1="218.0" y1="450" x2="218.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="218.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">6</text>
+<line x1="340.0" y1="450" x2="340.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="340.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">12</text>
+<line x1="462.0" y1="450" x2="462.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="462.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">18</text>
+<line x1="584.0" y1="450" x2="584.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="584.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">24</text>
+<line x1="706.0" y1="450" x2="706.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="706.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">30</text>
+<line x1="828.0" y1="450" x2="828.0" y2="455" stroke="#5b6672" stroke-width="1"/>
+<text x="828.0" y="469" font-size="10.5" fill="#5b6672" text-anchor="middle">36</text>
+<text x="462.0" y="488" font-size="10.5" fill="#5b6672" text-anchor="middle" font-style="italic">month</text>
+<polyline points="96.0,420.0 116.3,412.9 136.7,405.7 157.0,398.6 177.3,391.4 197.7,384.3 218.0,377.2 238.3,370.0 258.7,362.9 279.0,355.8 299.3,348.6 319.7,341.5 340.0,334.4 360.3,327.2 380.7,320.1 401.0,312.9 421.3,305.8 441.7,298.7 462.0,291.5 482.3,284.4 502.7,277.2 523.0,270.1 543.3,263.0 563.7,255.8 584.0,248.7 604.3,241.6 624.7,234.4 645.0,227.3 665.3,220.2 685.7,213.0 706.0,205.9 726.3,198.7 746.7,191.6 767.0,184.5 787.3,177.3 807.7,170.2 828.0,163.1" fill="none" stroke="#1a7f4b" stroke-width="1.8" stroke-dasharray="5 4"/>
+<polyline points="96.0,420.0 116.3,419.1 136.7,416.9 157.0,413.5 177.3,408.8 197.7,402.9 218.0,395.8 238.3,388.6 258.7,381.5 279.0,374.4 299.3,367.2 319.7,360.1 340.0,352.9 360.3,345.8 380.7,338.7 401.0,331.5 421.3,324.4 441.7,317.3 462.0,310.1 482.3,303.0 502.7,295.8 523.0,288.7 543.3,281.6 563.7,274.4 584.0,267.3 604.3,260.2 624.7,253.0 645.0,245.9 665.3,238.7 685.7,231.6 706.0,224.5 726.3,217.3 746.7,210.2 767.0,203.1 787.3,195.9 807.7,188.8 828.0,181.6" fill="none" stroke="#1f6feb" stroke-width="2.4"/>
+<circle cx="152.9" cy="400.0" r="3.5" fill="#1a7f4b"/>
+<text x="152.9" y="420.0" font-size="10" fill="#1a7f4b" text-anchor="middle">idealised 2.8 mo</text>
+<line x1="218.0" y1="150" x2="218.0" y2="450" stroke="#b45309" stroke-width="1.2" stroke-dasharray="3 3"/>
+<circle cx="218.0" cy="400.0" r="4" fill="#b45309"/>
+<text x="224.0" y="164.0" font-size="11" font-weight="700" fill="#b45309">pays back month 6</text>
+<line x1="660" y1="156" x2="688" y2="156" stroke="#1f6feb" stroke-width="2.4"/>
+<text x="694" y="160" font-size="10.5" fill="#1a2332">ramped (with ramp)</text>
+<line x1="660" y1="174" x2="688" y2="174" stroke="#1a7f4b" stroke-width="1.8" stroke-dasharray="5 4"/>
+<text x="694" y="178" font-size="10.5" fill="#1a2332">idealised (instant)</text>
+<text x="28" y="516" font-size="11.5" font-weight="600" fill="#1a2332">Read: a 6-month adoption ramp pushes payback to month 6 (+3.2 mo vs the idealised 2.8) and costs 37,188 EUR of 3-year net benefit (436,712 ramped vs 473,900).</text>
+<text x="28" y="536" font-size="10.5" fill="#5b6672">The linear ramp is an illustrative assumption on synthetic data, not a measured adoption curve. Generated by the real ROI model &#8212; reproduce with `python -m roi_model --rollout`.</text>
+</svg>
